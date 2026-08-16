@@ -1,6 +1,9 @@
 import logging
 import sqlite3
 import asyncio
+import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
@@ -13,6 +16,18 @@ from telegram.ext import (
     filters,
     ContextTypes,
 )
+
+# Render Port Health Check Server (Render ቦቱን እንዳይዘጋው የሚያስችል)
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
+
+def run_health_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    server.serve_forever()
 
 # ------------------ 1. መቼቶች (Configuration) ------------------
 TOKEN = "8594676233:AAFd1BKH5RBm4WWTNeWY_YCbKVE8ugp3WL4"
@@ -31,7 +46,6 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # የተጠቃሚዎች ሰንጠረዥ
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -44,7 +58,6 @@ def init_db():
         )
     ''')
     
-    # በየወሩ የተከፈሉ ደረሰኞች ታሪክ ማከማቻ (Payment History Table)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS payment_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,7 +107,6 @@ def update_user(user_id: int, **kwargs):
     conn.commit()
     conn.close()
 
-# --- ከፍለው ደረሰኝ ያፀደቁትን ብቻ መርጦ የሚያወጣ Function ---
 def get_paid_users_only():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -117,7 +129,6 @@ def get_paid_users_only():
         })
     return paid_users
 
-# --- የደረሰኝ ታሪክ መዝጋቢ ---
 def record_payment_history(user_id: int, photo_id: str, status: str):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -160,7 +171,6 @@ async def check_expired_payments_logic(bot):
     for uid, name, p_date_str in approved_users:
         if p_date_str:
             try:
-                # ቀን ብቻ መውሰድ (YYYY-MM-DD)
                 clean_date_str = p_date_str.split(' ')[0]
                 p_date = datetime.strptime(clean_date_str, "%Y-%m-%d")
                 days_passed = (today - p_date).days
@@ -246,7 +256,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=main_menu(user_id))
 
-# --- የምዝገባ ሂደት ---
 async def start_registration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await is_banned(update):
         return ConversationHandler.END
@@ -280,7 +289,6 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
-# --- የክፍያ ሂደት ---
 async def start_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await is_banned(update):
         return ConversationHandler.END
@@ -306,7 +314,6 @@ async def receive_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     update_user(user_id, payment_status='በማረጋገጥ ላይ (Pending)')
     user = get_user(user_id)
     
-    # የደረሰኝ ታሪክ በቋሚነት ዳታቤዝ ላይ ይመዘገባል
     record_payment_history(user_id, photo_file_id, "በማረጋገጥ ላይ")
     
     await update.message.reply_text(
@@ -343,7 +350,6 @@ async def invalid_receipt_format(update: Update, context: ContextTypes.DEFAULT_T
     )
     return PAY_RECEIPT
 
-# --- የአድሚን ውሳኔ ማስተናገጃ ---
 async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     
@@ -383,7 +389,6 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             parse_mode=ParseMode.HTML
         )
 
-# --- የአድሚን Dashboard & የተከፈሉ ተጠቃሚዎች ዝርዝር ---
 async def show_admin_panel(query, context):
     all_users = get_all_users()
     paid_users = get_paid_users_only()
@@ -403,7 +408,6 @@ async def show_admin_panel(query, context):
     ])
     await query.edit_message_text(report, reply_markup=admin_buttons, parse_mode=ParseMode.HTML)
 
-# ከፍለው ደረሰኝ ያፀደቁትን ብቻ ለይቶ የሚያሳይ Handler
 async def show_paid_users_list(query, context):
     paid_users = get_paid_users_only()
     
@@ -460,7 +464,6 @@ async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
-# --- የቁልፎች ማስተናገጃ ---
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await is_banned(update):
         return
@@ -577,6 +580,9 @@ async def post_init(app):
     asyncio.create_task(background_payment_checker(app))
 
 if __name__ == '__main__':
+    # Render Port Health Check ሰርቨር ማስነሳት
+    threading.Thread(target=run_health_server, daemon=True).start()
+
     init_db()
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
@@ -630,5 +636,5 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(handle_admin_action, pattern='^(approve|reject)_'))
     app.add_handler(CallbackQueryHandler(handle_buttons))
 
-    print("🚀 ቦቱ ደረሰኝ የላኩትን ብቻ ለይቶ ከማስቀመጥ አሰራር ጋር ስራ ጀምሯል...")
+    print("🚀 ቦቱ Render ላይ በተሳካ ሁኔታ ስራ ጀምሯል...")
     app.run_polling()
