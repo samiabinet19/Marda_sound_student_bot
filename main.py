@@ -474,15 +474,16 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if query.data == 'main':
         await start(update, context)
-        
-    elif query.data == 'show_paid_only' and user_id == ADMIN_ID:
-        await show_paid_users_list(query, context)
-
-    elif query.data == 'force_check_payments' and user_id == ADMIN_ID:
-        await query.edit_message_text("⏳ ክፍያዎች እየተፈተሹ ነው...")
-        await check_expired_payments_logic(context.bot)
-        await query.edit_message_text("✅ የክፍያ ማስታወሻዎች በተሳካ ሁኔታ ተላኩ!", reply_markup=back_menu())
-        
+        elif query.data == 'school_courses':
+        text = (
+            "📚 <b>የሚሰጡ ትምህርቶች እና ኮርሶች</b>\n\n"
+            "1. 💻 <b>Audio Fundamentals & Sound Physics:</b> የድምፅ ሞገድ ባህሪያት (Frequency, Amplitude, Phase)፣ የሰው ልጅ የመስማት ሂደት (Psychoacoustics) እና የክፍል አካውስቲክስ (Room Acoustics) መሠረታዊ ሕጎችን ይሸፍናል\n"
+            "2. 🇬🇧 <b>የDigital Audio Workstations (DAW) & Signal Flow:</b> እንደ Pro Tools, Logic Pro ወይም Ableton ያሉ ሶፍትዌሮችን አጠቃቀም፣ የማይክሮፎን አይነቶችንና አቀማመጥ፣ እንዲሁም የኦዲዮ ሲግናል ፍሰትን (Signal Routing) ያስተምራል።\n"
+            "3. 📐 <b>የMixing & Mastering Engineering:</b> የተለያዩ የተቀረፁ የድምፅ መስመሮችን (Multi-track audio) አዋህዶ ሚዛናዊ ማድረግ (Mixing) እና ለመጨረሻው ዲጂታል ስርጭት ጥራቱን ጠብቆ ማዘጋጀትን (Mastering) ያተኩራል"
+        )
+        sub_menu = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ ወደ ትምህርት ቤት ማውጫ", callback_data='school_info')]])
+        await query.edit_message_text(text, reply_markup=sub_menu, parse_mode=ParseMode.HTML)
+    
     elif query.data == 'school_info':
         school_menu = InlineKeyboardMarkup([
             [InlineKeyboardButton("ℹ️ ስለ ትምህርት ቤቱ", callback_data='about_school')],
