@@ -1,0 +1,635 @@
+Sami:
+import logging
+import sqlite3
+import asyncio
+from datetime import datetime
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ConversationHandler,
+    filters,
+    ContextTypes,
+)
+
+# ------------------ 1. መቼቶች (Configuration) ------------------
+TOKEN = "8594676233:AAFd1BKH5RBm4WWTNeWY_YCbKVE8ugp3WL4"
+ADMIN_ID = 7857140781
+VIP_LINK = "https://t.me/+YourVIPPrivateChannelLinkHere"
+
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+DB_NAME = "bot_database.db"
+
+# ------------------ 2. SQLite Database Functions ------------------
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    # የተጠቃሚዎች ሰንጠረዥ
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            name TEXT DEFAULT 'አልተመዘገበም',
+            phone TEXT DEFAULT 'አልተመዘገበም',
+            payment_status TEXT DEFAULT 'አልተከፈለም',
+            balance REAL DEFAULT 0.0,
+            is_banned INTEGER DEFAULT 0,
+            payment_date TEXT DEFAULT ''
+        )
+    ''')
+    
+    # በየወሩ የተከፈሉ ደረሰኞች ታሪክ ማከማቻ (Payment History Table)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS payment_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            photo_id TEXT,
+            amount REAL DEFAULT 100.0,
+            payment_date TEXT,
+            status TEXT
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+def get_user(user_id: int):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id, name, phone, payment_status, balance, is_banned, payment_date FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {
+            'user_id': row[0],
+            'name': row[1],
+            'phone': row[2],
+            'payment_status': row[3],
+            'balance': row[4],
+            'is_banned': row[5],
+            'payment_date': row[6]
+        }
+    return None
+
+def add_user_if_not_exists(user_id: int):
+    user = get_user(user_id)
+    if not user:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute('INSERT INTO users (user_id) VALUES (?)', (user_id,))
+        conn.commit()
+        conn.close()
+
+def update_user(user_id: int, **kwargs):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    for key, value in kwargs.items():
+        cursor.execute(f'UPDATE users SET {key} = ? WHERE user_id = ?', (value, user_id))
+    conn.commit()
+    conn.close()
+
+# --- ከፍለው ደረሰኝ ያፀደቁትን ብቻ መርጦ የሚያወጣ Function ---
+def get_paid_users_only():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT user_id, name, phone, payment_date, payment_status 
+        FROM users 
+        WHERE payment_status = 'ፅድቋል (Approved)'
+    ''')
+    rows = cursor.fetchall()
+    conn.close()
+    
+    paid_users = []
+    for row in rows:
+        paid_users.append({
+            'user_id': row[0],
+            'name': row[1],
+            'phone': row[2],
+            'payment_date': row[3],
+            'payment_status': row[4]
+        })
+    return paid_users
+
+# --- የደረሰኝ ታሪክ መዝጋቢ ---
+def record_payment_history(user_id: int, photo_id: str, status: str):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    today_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    cursor.execute('''
+        INSERT INTO payment_history (user_id, photo_id, payment_date, status)
+        VALUES (?, ?, ?, ?)
+    ''', (user_id, photo_id, today_str, status))
+    conn.commit()
+    conn.close()
+
+def get_all_users():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id, name, phone, payment_status, balance, is_banned, payment_date FROM users')
+    rows = cursor.fetchall()
+    conn.close()
+    users = []
+    for row in rows:
+        users.append({
+            'user_id': row[0],
+            'name': row[1],
+            'phone': row[2],
+            'payment_status': row[3],
+            'balance': row[4],
+            'is_banned': row[5],
+            'payment_date': row[6]
+        })
+    return users
+
+# ------------------ 3. የወርሃዊ ክፍያ ማስታወሻ ------------------
+async def check_expired_payments_logic(bot):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id, name, payment_date FROM users WHERE payment_status = ?', ('ፅድቋል (Approved)',))
+    approved_users = cursor.fetchall()
+    conn.close()
+
+    today = datetime.now()
+    for uid, name, p_date_str in approved_users:
+        if p_date_str:
+            try:
+                # ቀን ብቻ መውሰድ (YYYY-MM-DD)
+                clean_date_str = p_date_str.split(' ')[0]
+                p_date = datetime.strptime(clean_date_str, "%Y-%m-%d")
+                days_passed = (today - p_date).days
+                
+                if days_passed == 28:
+                    await bot.send_message(
+                        chat_id=uid,
+                        text=f"⚠️ <b>የክፍያ ማስታወሻ!</b>\n\nሰላም <b>{name}</b>፣ ክፍያዎ ለማለቅ <b>2 ቀን ብቻ</b> ቀርቶታል። አገልግሎቱ እንዳይቋረጥብዎ ያድሱ።",
+                        parse_mode=ParseMode.HTML
+                    )
+                elif days_passed >= 30:
+                    update_user(uid, payment_status='ጊዜው ያለፈበት (Expired)')
+                    await bot.send_message(
+                        chat_id=uid,
+                        text=f"🔔 <b>የክፍያ ጊዜዎ አብቅቷል!</b>\n\nሰላም <b>{name}</b>፣ 30 ቀናት ስለሞሉ የወሩ ክፍያ ጊዜዎ አብቅቷል። በ <b>'💳 ክፍያ ፈፅም'</b> በኩል ድጋሚ ይክፈሉ።",
+                        parse_mode=ParseMode.HTML
+                    )
+            except Exception as e:
+                logging.error(f"Error checking user {uid}: {e}")
+
+async def background_payment_checker(app):
+    while True:
+        try:
+            await check_expired_payments_logic(app.bot)
+        except Exception as e:
+            logging.error(f"Background checker error: {e}")
+        await asyncio.sleep(43200)
+
+# ------------------ 4. Keyboards & States ------------------
+REG_NAME, REG_PHONE = range(2)
+PAY_RECEIPT = 2
+BROADCAST_STATE = 3
+
+def main_menu(user_id: int) -> InlineKeyboardMarkup:
+    user = get_user(user_id)
+    keyboard = [
+        [InlineKeyboardButton("🏫 ስለ ትምህርት ቤቱ (School Info)", callback_data='school_info')],
+        [InlineKeyboardButton("📝 አዲስ ምዝገባ (Register)", callback_data='register')],
+        [InlineKeyboardButton("💳 ክፍያ ፈፅም (Pay)", callback_data='pay')],
+        [InlineKeyboardButton("👤 የመገለጫ መረጃ (Profile)", callback_data='profile')],
+        [InlineKeyboardButton("💰 የሂሳብ ባላንስ (Wallet)", callback_data='wallet')]
+    ]
+    
+    if user and user['payment_status'] == 'ፅድቋል (Approved)':
+        keyboard.append([InlineKeyboardButton("🌟 VIP ቻናል መግቢያ", url=VIP_LINK)])
+        
+    keyboard.append([InlineKeyboardButton("📞 ግንኙነት (Contact)", callback_data='contact')])
+
+    if user_id == ADMIN_ID:
+        keyboard.append([InlineKeyboardButton("⚙️ የአድሚን ገጽ (Admin)", callback_data='admin_panel')])
+        
+    return InlineKeyboardMarkup(keyboard)
+
+def back_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ ወደ ዋና ማውጫ ተመለስ", callback_data='main')]])
+
+async def is_banned(update: Update) -> bool:
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    if user and user['is_banned'] == 1:
+        if update.message:
+            await update.message.reply_text("❌ <b>እርስዎ ከዚህ ቦት ታግደዋል!</b>", parse_mode=ParseMode.HTML)
+        elif update.callback_query:
+            try:
+                await update.callback_query.answer("❌ እርስዎ ከዚህ ቦት ታግደዋል!", show_alert=True)
+            except Exception:
+                pass
+        return True
+    return False
+
+# ------------------ 5. Handlers ------------------
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await is_banned(update):
+        return
+    user_id = update.effective_user.id
+    add_user_if_not_exists(user_id)
+    
+    text = "እንኳን ወደ ፖርታሉ በሰላም መጡ! 👋\nእባክዎን የሚፈልጉትን አገልግሎት ይምረጡ፡"
+    
+    if update.message:
+        await update.message.reply_text(text, reply_markup=main_menu(user_id))
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=main_menu(user_id))
+
+# --- የምዝገባ ሂደት ---
+async def start_registration(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await is_banned(update):
+        return ConversationHandler.END
+    query = update.callback_query
+    await query.edit_message_text("📝 <b>የምዝገባ ፎርም</b>\n\nእባክዎን <b>ሙሉ ስምዎን</b> ይፃፉልን፡\n\n(ለማቋረጥ /cancel ይበሉ)", parse_mode=ParseMode.HTML)
+    return REG_NAME
+
+async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await is_banned(update):
+        return ConversationHandler.END
+    user_id = update.effective_user.id
+    add_user_if_not_exists(user_id)
+    update_user(user_id, name=update.message.text)
+    await update.message.reply_text("በጣም ጥሩ! አሁን <b>የስልክ ቁጥርዎን</b> ያስገቡ፡", parse_mode=ParseMode.HTML)
+    return REG_PHONE
+
+async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await is_banned(update):
+        return ConversationHandler.END
+    user_id = update.effective_user.id
+    update_user(user_id, phone=update.message.text)
+    user = get_user(user_id)
+    
+    await update.message.reply_text(
+        f"✅ <b>ምዝገባዎ ተጠናቋል!</b>\n\n"
+        f"👤 <b>ስም:</b> {user['name']}\n"
+        f"📞 <b>ስልክ:</b> {user['phone']}\n\n"
+        f"አሁን <b>'💳 ክፍያ ፈፅም'</b> የሚለውን በመጫን ደረሰኝ ማስገባት ይችላሉ።",
+        reply_markup=main_menu(user_id),
+        parse_mode=ParseMode.HTML
+    )
+    return ConversationHandler.END
+
+# --- የክፍያ ሂደት ---
+async def start_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await is_banned(update):
+        return ConversationHandler.END
+    query = update.callback_query
+    
+    payment_info = (
+        "💳 <b>የክፍያ መረጃ</b>\n\n"
+        "እባክዎን የቦቱን አገልግሎት ለማግኘት ክፍያውን በታች ባሉት አካውንቶች ይላኩ፡\n\n"
+        "• <b>CBE (ንግድ ባንክ):</b> <code>1000579602264</code>\n"
+        "• <b>Telebirr:</b> <code>0966089190</code>\n\n"
+        "ከከፈሉ በኋላ የከፈሉበትን <b>ደረሰኝ (የደረሰኝ ፎቶ/Screenshot)</b> እዚህ ይላኩሊን፡"
+    )
+    await query.edit_message_text(payment_info, parse_mode=ParseMode.HTML, reply_markup=back_menu())
+    return PAY_RECEIPT
+
+async def receive_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await is_banned(update):
+        return ConversationHandler.END
+    user_id = update.effective_user.id
+    photo_file_id = update.message.photo[-1].file_id
+    
+    add_user_if_not_exists(user_id)
+    update_user(user_id, payment_status='በማረጋገጥ ላይ (Pending)')
+    user = get_user(user_id)
+    
+    # የደረሰኝ ታሪክ በቋሚነት ዳታቤዝ ላይ ይመዘገባል
+    record_payment_history(user_id, photo_file_id, "በማረጋገጥ ላይ")
+    
+    await update.message.reply_text(
+        "✅ <b>ደረሰኝዎ ደርሶናል!</b>\nአድሚኑ አረጋግጦ እስኪያፀድቀው ድረስ እባክዎን ትንሽ ይታገሱ።",
+        reply_markup=main_menu(user_id),
+        parse_mode=ParseMode.HTML
+    )
+    
+    admin_markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ አፅድቅ", callback_data=f"approve_{user_id}"),
+            InlineKeyboardButton("❌ ውደቅ አድርግ", callback_data=f"reject_{user_id}")
+        ]
+    ])
+    caption = (
+        f"📩 <b>አዲስ የክፍያ ደረሰኝ ደርሷል!</b>\n\n"
+        f"👤 <b>ስም:</b> {user['name']}\n"
+        f"📞 <b>ስልክ:</b> {user['phone']}\n"
+        f"🆔 <b>User ID:</b> <code>{user_id}</code>"
+    )
+    await context.bot.send_photo(
+        chat_id=ADMIN_ID,
+        photo=photo_file_id,
+        caption=caption,
+        reply_markup=admin_markup,
+        parse_mode=ParseMode.HTML
+    )
+    return ConversationHandler.END
+
+async def invalid_receipt_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "⚠️ <b>እባክዎን የደረሰኝ ፎቶ (Photo/Screenshot) ብቻ ይላኩ!</b>\n\nሂደቱን ለማቋረጥ ከፈለጉ /cancel የሚለውን ይጫኑ።",
+        parse_mode=ParseMode.HTML
+    )
+    return PAY_RECEIPT
+
+# --- የአድሚን ውሳኔ ማስተናገጃ ---
+async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    data = query.data.split('_')
+    action = data[0]
+    target_user_id = int(data[1])
+    
+    if action == "approve":
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        update_user(target_user_id, payment_status='ፅድቋል (Approved)', balance=100.0, payment_date=today_str)
+        
+        await query.edit_message_caption(
+            caption=f"{query.message.caption}\n\n✅ <b>ሁኔታ:</b> ክፍያው ፅድቋል!",
+            reply_markup=None,
+            parse_mode=ParseMode.HTML
+        )
+        vip_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🌟 ወደ VIP ቻናል ይግቡ", url=VIP_LINK)]])
+        await context.bot.send_message(
+            chat_id=target_user_id,
+            text="🎉 <b>እንኳን ደስ አለዎት!</b> ክፍያዎ በአድሚኑ ተረጋግጦ ፅድቋል። አሁን VIP ቻናላችንን መቀላቀል ይችላሉ!",
+            reply_markup=vip_markup,
+            parse_mode=ParseMode.HTML
+        )
+    elif action == "reject":
+        update_user(target_user_id, payment_status='ተሰርዟል (Rejected)')
+        await query.edit_message_caption(
+            caption=f"{query.message.caption}\n\n❌ <b>ሁኔታ:</b> ክፍያው ውድቅ ተደርጓል!",
+            reply_markup=None,
+            parse_mode=ParseMode.HTML
+        )
+        await context.bot.send_message(
+            chat_id=target_user_id,
+            text="❌ <b>ክፍያዎ አልፀደቀም።</b> እባክዎን ትክክለኛ ደረሰኝ መላክዎን ያረጋግጡ።",
+            parse_mode=ParseMode.HTML
+        )
+
+# --- የአድሚን Dashboard & የተከፈሉ ተጠቃሚዎች ዝርዝር ---
+async def show_admin_panel(query, context):
+    all_users = get_all_users()
+    paid_users = get_paid_users_only()
+    
+    report = (
+        f"⚙️ <b>የአድሚን መቆጣጠሪያ Dashboard</b>\n\n"
+        f"👥 <b>ጠቅላላ ተጠቃሚዎች:</b> {len(all_users)}\n"
+        f"✅ <b>ከፍለው ደረሰኝ ያፀደቁ:</b> {len(paid_users)} ተጠቃሚዎች\n\n"
+        f"ከታች ያሉትን ቁልፎች በመጠቀም ዝርዝር ማየት ይችላሉ፡"
+    )
+            
+    admin_buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ ከፍለው ደረሰኝ የላኩ ብቻ (Paid)", callback_data='show_paid_only')],
+        [InlineKeyboardButton("📢 መልእክት በት (Broadcast)", callback_data='start_broadcast')],
+        [InlineKeyboardButton("🔄 ክፍያዎችን በግድ ፈትሽ", callback_data='force_check_payments')],
+        [InlineKeyboardButton("⬅️ ወደ ዋና ማውጫ", callback_data='main')]
+    ])
+    await query.edit_message_text(report, reply_markup=admin_buttons, parse_mode=ParseMode.HTML)
+
+# ከፍለው ደረሰኝ ያፀደቁትን ብቻ ለይቶ የሚያሳይ Handler
+async def show_paid_users_list(query, context):
+    paid_users = get_paid_users_only()
+    
+    if not paid_users:
+        text = "❌ <b>እስካሁን ደረሰኝ ልከው ክፍያቸው የጸደቀላቸው ተጠቃሚዎች የሉም።</b>"
+    else:
+        text = f"✅ <b>ከፍለው ደረሰኝ የላኩ ተጠቃሚዎች ዝርዝር ({len(paid_users)})</b>\n\n"
+        for idx, u in enumerate(paid_users, 1):
+            text += (
+                f"{idx}. <b>ስም:</b> {u['name']}\n"
+                f"   <b>ስልክ:</b> {u['phone']}\n"
+                f"   <b>የተከፈለበት ቀን:</b> {u['payment_date']}\n"
+                f"   <b>ID:</b> <code>{u['user_id']}</code>\n"
+                f"   -------------------\n"
+            )
+            
+    buttons = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ ወደ አድሚን ገጽ", callback_data='admin_panel')]])
+    await query.edit_message_text(text, reply_markup=buttons, parse_mode=ParseMode.HTML)
+
+async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.edit_message_text(
+        "📢 <b>የብሮድካስት መልእክት</b>\n\nለሁሉም ተጠቃሚዎች እንዲላክ የሚፈልጉትን መልእክት ይጻፉልኝ፡\n\n(ለማቋረጥ /cancel ይበሉ)",
+        parse_mode=ParseMode.HTML
+    )
+    return BROADCAST_STATE
+
+async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return ConversationHandler.END
+        
+    broadcast_msg = update.message.text
+    users = get_all_users()
+    success, failed = 0, 0
+    
+    await update.message.reply_text("⏳ መልእክቱ እየተላከ ነው...")
+    
+    for u in users:
+        if u['is_banned'] == 0:
+            try:
+                await context.bot.send_message(
+                    chat_id=u['user_id'],
+                    text=f"📢 <b>ማስታወቂያ ከፖርታሉ:</b>\n\n{broadcast_msg}",
+                    parse_mode=ParseMode.HTML
+                )
+                success += 1
+            except Exception:
+                failed += 1
+                
+    await update.message.reply_text(
+        f"✅ <b>ብሮድካስት ተጠናቋል!</b>\n\n• በተሳካ ሁኔታ የደረሳቸው: {success}\n• ያልደረሳቸው: {failed}",
+        reply_markup=main_menu(ADMIN_ID),
+        parse_mode=ParseMode.HTML
+    )
+    return ConversationHandler.END
+
+# --- የቁልፎች ማስተናገጃ ---
+async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await is_banned(update):
+        return
+    query = update.callback_query
+    user_id = update.effective_user.id
+    
+    try:
+        await query.answer()
+    except Exception:
+        pass
+    
+    if query.data == 'main':
+        await start(update, context)
+        
+    elif query.data == 'show_paid_only' and user_id == ADMIN_ID:
+        await show_paid_users_list(query, context)
+
+    elif query.data == 'force_check_payments' and user_id == ADMIN_ID:
+        await query.edit_message_text("⏳ ክፍያዎች እየተፈተሹ ነው...")
+        await check_expired_payments_logic(context.bot)
+        await query.edit_message_text("✅ የክፍያ ማስታወሻዎች በተሳካ ሁኔታ ተላኩ!", reply_markup=back_menu())
+        
+    elif query.data == 'school_info':
+        school_menu = InlineKeyboardMarkup([
+            [InlineKeyboardButton("ℹ️ ስለ ትምህርት ቤቱ", callback_data='about_school')],
+            [InlineKeyboardButton("📚 የሚሰጡ ትምህርቶች", callback_data='school_courses')],
+            [InlineKeyboardButton("📢 ወቅታዊ ማስታወቂያዎች", callback_data='school_news')],
+            [InlineKeyboardButton("⬅️ ወደ ዋና ማውጫ", callback_data='main')]
+        ])
+        await query.edit_message_text(
+            "🏫 <b>የትምህርት ቤቱ መረጃ እና ማስታወቂያዎች</b>\n\nእባክዎን ማወቅ የሚፈልጉትን መረጃ ከታች ይምረጡ፡",
+            reply_markup=school_menu,
+            parse_mode=ParseMode.HTML
+        )
+
+    elif query.data == 'about_school':
+        text = (
+            "ℹ️ <b>ስለ ትምህርት ቤታችን</b>\n\n"
+            "ትምህርት ቤታችን በዘመናዊ የትምህርት አሰጣጥ እና በቴክኖሎጂ የተደገፈ ጥራት ያለው ትምህርት ለመስጠት የተቋቋመ ነው፡\n\n"
+            "🎯 <b>ራዕይ:</b> በደንብ የዳበረ እና ከልምድ ወጥቶ በትምህርት የታገዘ የሳውንድ እውቀት ያለው ባለሙያ መፍጠር።\n"
+            "⭐ <b>ተልዕኮ:</b> ጥራት ያለውና ተመጣጣኝ ትምህርት ለሁሉም ማዳረስ።"
+        )
+        sub_menu = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ ወደ ትምህርት ቤት ማውጫ", callback_data='school_info')]])
+        await query.edit_message_text(text, reply_markup=sub_menu, parse_mode=ParseMode.HTML)
+
+    elif query.data == 'school_courses':
+        text = (
+            "📚 <b>የሚሰጡ ትምህርቶች እና ኮርሶች</b>\n\n"
+            "1. 💻 <b>Audio Fundamentals & Sound Physics:</b> የድምፅ ሞገድ ባህሪያት (Frequency, Amplitude, Phase)፣ የሰው ልጅ የመስማት ሂደት (Psychoacoustics) እና የክፍል አካውስቲክስ (Room Acoustics) መሠረታዊ ሕጎችን ይሸፍናል\n"
+            "2. 🇬🇧 <b>የDigital Audio Workstations (DAW) & Signal Flow:</b> እንደ Pro Tools, Logic Pro ወይም Ableton ያሉ ሶፍትዌሮችን አጠቃቀም፣ የማይክሮፎን አይነቶችንና አቀማመጥ፣ እንዲሁም የኦዲዮ ሲግናል ፍሰትን (Signal Routing) ያስተምራል።\n"
+            "3. 📐 <b>የMixing & Mastering Engineering:</b> የተለያዩ የተቀረፁ የድምፅ መስመሮችን (Multi-track audio) አዋህዶ ሚዛናዊ ማድረግ (Mixing) እና ለመጨረሻው ዲጂታል ስርጭት ጥራቱን ጠብቆ ማዘጋጀትን (Mastering) ያተኩራል"
+        )
+        sub_menu = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ ወደ ትምህርት ቤት ማውጫ", callback_data='school_info')]])
+        await query.edit_message_text(text, reply_markup=sub_menu, parse_mode=ParseMode.HTML)
+
+elif query.data == 'school_news':
+        text = (
+            "📢 <b>ወቅታዊ ማስታወቂያዎች</b>\n\n"
+            "📌 <b>ለአዲሱ መንፈቅ ዓመት የምዝገባ ጥሪ!</b>\n"
+            "የአዲሱ ትምህርት ዘመን ምዝገባ ተጀምሯል። ቦታዎች ሳይሞሉ በፍጥነት ይመዝገቡ።\n\n"
+            "📅 <b>የክፍል መጀመሪያ ቀን:</b> የፊታችን ሰኞ\n"
+            "💡 ለተጨማሪ መረጃ የ 'Contact' ቁልፍን በመጫን ያግኙን።"
+        )
+        sub_menu = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ ወደ ትምህርት ቤት ማውጫ", callback_data='school_info')]])
+        await query.edit_message_text(text, reply_markup=sub_menu, parse_mode=ParseMode.HTML)
+
+    elif query.data == 'profile':
+        user = get_user(user_id)
+        p_date = user['payment_date'] if user['payment_date'] else "ያልተመዘገበ"
+        profile_text = (
+            f"📋 <b>የመገለጫ መረጃ</b>\n\n"
+            f"• <b>ስም:</b> {user['name']}\n"
+            f"• <b>ስልክ:</b> {user['phone']}\n"
+            f"• <b>የክፍያ ሁኔታ:</b> {user['payment_status']}\n"
+            f"• <b>መጨረሻ የተከፈለው:</b> {p_date}\n"
+            f"• <b>የአካውንት ባላንስ:</b> {user['balance']} ETB"
+        )
+        await query.edit_message_text(profile_text, reply_markup=back_menu(), parse_mode=ParseMode.HTML)
+        
+    elif query.data == 'wallet':
+        user = get_user(user_id)
+        wallet_text = (
+            f"💰 <b>የእርስዎ የሂሳብ ባላንስ (Wallet)</b>\n\n"
+            f"• <b>ያለዎት ባላንስ:</b> <code>{user['balance']} ETB</code>\n\n"
+            f"💡 ባላንስዎን ለመጨመር በ '💳 ክፍያ ፈፅም' በኩል ደረሰኝ ያስገቡ።"
+        )
+        await query.edit_message_text(wallet_text, reply_markup=back_menu(), parse_mode=ParseMode.HTML)
+
+    elif query.data == 'contact':
+        contact_text = (
+            "📞 <b>እኛን ለማግኘት:</b>\n\n"
+            "• <b>ስልክ:</b> +251966089190\n"
+            "• <b>ኢሜይል:</b> samiabinet19@gmail.com\n"
+            "• <b>አድራሻ:</b> አዲስ አበባ ልዩ ስሙ መገናኛ ከዘፍነሽ ሞል ፊት ለፊት ያለው አቢስንያ ባንክ የሚገኝበት ላይ ሁለተኛ ፍቅ፣ ኢትዮጵያ"
+        )
+        await query.edit_message_text(contact_text, reply_markup=back_menu(), parse_mode=ParseMode.HTML)
+        
+    elif query.data == 'admin_panel':
+        if user_id == ADMIN_ID:
+            await show_admin_panel(query, context)
+        else:
+            await query.edit_message_text("❌ ይህንን ገጽ ለማየት ፈቃድ የሎትም።", reply_markup=back_menu())
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if update.message:
+        await update.message.reply_text("❌ ሂደቱ ተቋርጧል።", reply_markup=main_menu(user_id))
+    elif update.callback_query:
+        await update.callback_query.edit_message_text("❌ ሂደቱ ተቋርጧል።", reply_markup=main_menu(user_id))
+    return ConversationHandler.END
+
+# ------------------ 6. ዋና ማስኪያጃ (Main Execution) ------------------
+async def post_init(app):
+    asyncio.create_task(background_payment_checker(app))
+
+if name == 'main':
+    init_db()
+
+    app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+
+    reg_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_registration, pattern='^register$')],
+        states={
+            REG_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
+            REG_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)],
+        },
+        fallbacks=[
+            CommandHandler('cancel', cancel),
+            CallbackQueryHandler(cancel, pattern='^main$')
+        ],
+        allow_reentry=True
+    )
+    
+    pay_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_payment, pattern='^pay$')],
+        states={
+            PAY_RECEIPT: [
+                MessageHandler(filters.PHOTO, receive_receipt),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, invalid_receipt_format)
+            ],
+        },
+        fallbacks=[
+            CommandHandler('cancel', cancel),
+            CallbackQueryHandler(cancel, pattern='^main$')
+        ],
+        allow_reentry=True
+    )
+
+broadcast_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_broadcast, pattern='^start_broadcast$')],
+        states={
+            BROADCAST_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_broadcast)],
+        },
+        fallbacks=[
+            CommandHandler('cancel', cancel),
+            CallbackQueryHandler(cancel, pattern='^main$')
+        ],
+        allow_reentry=True
+    )
+
+    app.add_handler(CommandHandler("start", start))
+    
+    app.add_handler(reg_handler)
+    app.add_handler(pay_handler)
+    app.add_handler(broadcast_handler)
+    
+    app.add_handler(CallbackQueryHandler(handle_admin_action, pattern='^(approve|reject)_'))
+    app.add_handler(CallbackQueryHandler(handle_buttons))
+
+    print("🚀 ቦቱ ደረሰኝ የላኩትን ብቻ ለይቶ ከማስቀመጥ አሰራር ጋር ስራ ጀምሯል...")
+    app.run_polling()
