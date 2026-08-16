@@ -474,16 +474,15 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if query.data == 'main':
         await start(update, context)
-        elif query.data == 'school_courses':
-        text = (
-            "📚 <b>የሚሰጡ ትምህርቶች እና ኮርሶች</b>\n\n"
-            "1. 💻 <b>Audio Fundamentals & Sound Physics:</b> የድምፅ ሞገድ ባህሪያት (Frequency, Amplitude, Phase)፣ የሰው ልጅ የመስማት ሂደት (Psychoacoustics) እና የክፍል አካውስቲክስ (Room Acoustics) መሠረታዊ ሕጎችን ይሸፍናል\n"
-            "2. 🇬🇧 <b>የDigital Audio Workstations (DAW) & Signal Flow:</b> እንደ Pro Tools, Logic Pro ወይም Ableton ያሉ ሶፍትዌሮችን አጠቃቀም፣ የማይክሮፎን አይነቶችንና አቀማመጥ፣ እንዲሁም የኦዲዮ ሲግናል ፍሰትን (Signal Routing) ያስተምራል።\n"
-            "3. 📐 <b>የMixing & Mastering Engineering:</b> የተለያዩ የተቀረፁ የድምፅ መስመሮችን (Multi-track audio) አዋህዶ ሚዛናዊ ማድረግ (Mixing) እና ለመጨረሻው ዲጂታል ስርጭት ጥራቱን ጠብቆ ማዘጋጀትን (Mastering) ያተኩራል"
-        )
-        sub_menu = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ ወደ ትምህርት ቤት ማውጫ", callback_data='school_info')]])
-        await query.edit_message_text(text, reply_markup=sub_menu, parse_mode=ParseMode.HTML)
-    
+        
+    elif query.data == 'show_paid_only' and user_id == ADMIN_ID:
+        await show_paid_users_list(query, context)
+
+    elif query.data == 'force_check_payments' and user_id == ADMIN_ID:
+        await query.edit_message_text("⏳ ክፍያዎች እየተፈተሹ ነው...")
+        await check_expired_payments_logic(context.bot)
+        await query.edit_message_text("✅ የክፍያ ማስታወሻዎች በተሳካ ሁኔታ ተላኩ!", reply_markup=back_menu())
+        
     elif query.data == 'school_info':
         school_menu = InlineKeyboardMarkup([
             [InlineKeyboardButton("ℹ️ ስለ ትምህርት ቤቱ", callback_data='about_school')],
@@ -517,7 +516,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sub_menu = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ ወደ ትምህርት ቤት ማውጫ", callback_data='school_info')]])
         await query.edit_message_text(text, reply_markup=sub_menu, parse_mode=ParseMode.HTML)
 
-   elif query.data == 'school_news':
+    elif query.data == 'school_news':
         text = (
             "📢 <b>ወቅታዊ ማስታወቂያዎች</b>\n\n"
             "📌 <b>ለአዲሱ መንፈቅ ዓመት የምዝገባ ጥሪ!</b>\n"
@@ -577,7 +576,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def post_init(app):
     asyncio.create_task(background_payment_checker(app))
 
-if name == 'main':
+if __name__ == '__main__':
     init_db()
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
@@ -610,7 +609,7 @@ if name == 'main':
         allow_reentry=True
     )
 
-broadcast_handler = ConversationHandler(
+    broadcast_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_broadcast, pattern='^start_broadcast$')],
         states={
             BROADCAST_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_broadcast)],
