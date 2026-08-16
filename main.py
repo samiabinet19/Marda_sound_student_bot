@@ -516,7 +516,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sub_menu = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ ወደ ትምህርት ቤት ማውጫ", callback_data='school_info')]])
         await query.edit_message_text(text, reply_markup=sub_menu, parse_mode=ParseMode.HTML)
 
-elif query.data == 'school_news':
+   elif query.data == 'school_news':
         text = (
             "📢 <b>ወቅታዊ ማስታወቂያዎች</b>\n\n"
             "📌 <b>ለአዲሱ መንፈቅ ዓመት የምዝገባ ጥሪ!</b>\n"
