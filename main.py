@@ -676,4 +676,3 @@ if __name__ == '__main__':
 
     print("🚀 ቦቱ Render ላይ በተሳካ ሁኔታ ስራ ጀምሯል...")
     app.run_polling()
-
