@@ -51,12 +51,19 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             name TEXT DEFAULT 'አልተመዘገበም',
             phone TEXT DEFAULT 'አልተመዘገበም',
+            batch TEXT DEFAULT 'ያልተመረጠ',
             payment_status TEXT DEFAULT 'አልተከፈለም',
             balance REAL DEFAULT 0.0,
             is_banned INTEGER DEFAULT 0,
             payment_date TEXT DEFAULT ''
         )
     ''')
+    
+    # ነባር ዳታቤዝ ካለ የ batch ኮለምን ማከል
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN batch TEXT DEFAULT "ያልተመረጠ"')
+    except Exception:
+        pass
     
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS payment_history (
@@ -75,7 +82,7 @@ def init_db():
 def get_user(user_id: int):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute('SELECT user_id, name, phone, payment_status, balance, is_banned, payment_date FROM users WHERE user_id = ?', (user_id,))
+    cursor.execute('SELECT user_id, name, phone, batch, payment_status, balance, is_banned, payment_date FROM users WHERE user_id = ?', (user_id,))
     row = cursor.fetchone()
     conn.close()
     if row:
@@ -83,10 +90,11 @@ def get_user(user_id: int):
             'user_id': row[0],
             'name': row[1],
             'phone': row[2],
-            'payment_status': row[3],
-            'balance': row[4],
-            'is_banned': row[5],
-            'payment_date': row[6]
+            'batch': row[3],
+            'payment_status': row[4],
+            'balance': row[5],
+            'is_banned': row[6],
+            'payment_date': row[7]
         }
     return None
 
@@ -111,7 +119,7 @@ def get_paid_users_only():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT user_id, name, phone, payment_date, payment_status 
+        SELECT user_id, name, phone, batch, payment_date, payment_status 
         FROM users 
         WHERE payment_status = 'ፅድቋል (Approved)'
     ''')
@@ -124,8 +132,9 @@ def get_paid_users_only():
             'user_id': row[0],
             'name': row[1],
             'phone': row[2],
-            'payment_date': row[3],
-            'payment_status': row[4]
+            'batch': row[3],
+            'payment_date': row[4],
+            'payment_status': row[5]
         })
     return paid_users
 
@@ -143,7 +152,7 @@ def record_payment_history(user_id: int, photo_id: str, status: str):
 def get_all_users():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute('SELECT user_id, name, phone, payment_status, balance, is_banned, payment_date FROM users')
+    cursor.execute('SELECT user_id, name, phone, batch, payment_status, balance, is_banned, payment_date FROM users')
     rows = cursor.fetchall()
     conn.close()
     users = []
@@ -152,10 +161,11 @@ def get_all_users():
             'user_id': row[0],
             'name': row[1],
             'phone': row[2],
-            'payment_status': row[3],
-            'balance': row[4],
-            'is_banned': row[5],
-            'payment_date': row[6]
+            'batch': row[3],
+            'payment_status': row[4],
+            'balance': row[5],
+            'is_banned': row[6],
+            'payment_date': row[7]
         })
     return users
 
@@ -200,9 +210,9 @@ async def background_payment_checker(app):
         await asyncio.sleep(43200)
 
 # ------------------ 4. Keyboards & States ------------------
-REG_NAME, REG_PHONE = range(2)
-PAY_RECEIPT = 2
-BROADCAST_STATE = 3
+REG_NAME, REG_PHONE, REG_BATCH = range(3)
+PAY_RECEIPT = 3
+BROADCAST_STATE = 4
 
 def main_menu(user_id: int) -> InlineKeyboardMarkup:
     user = get_user(user_id)
@@ -277,12 +287,36 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     user_id = update.effective_user.id
     update_user(user_id, phone=update.message.text)
-    user = get_user(user_id)
+    
+    keyboard = [
+        [InlineKeyboardButton("16ኛ ባች (Batch 16)", callback_data='reg_batch_16ኛ ባች'), InlineKeyboardButton("17ኛ ባች (Batch 17)", callback_data='reg_batch_17ኛ ባች')],
+        [InlineKeyboardButton("18ኛ ባች (Batch 18)", callback_data='reg_batch_18ኛ ባች'), InlineKeyboardButton("19ኛ ባች (Batch 19)", callback_data='reg_batch_19ኛ ባች')],
+        [InlineKeyboardButton("20ኛ ባች (Batch 20)", callback_data='reg_batch_20ኛ ባች'), InlineKeyboardButton("21ኛ ባች (Batch 21)", callback_data='reg_batch_21ኛ ባች')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
+        "አሁን ደግሞ <b>የተመደቡበትን ባች (ክፍል)</b> ይምረጡ፡",
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML
+    )
+    return REG_BATCH
+
+async def get_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    selected_batch = query.data.replace('reg_batch_', '')
+    
+    update_user(user_id, batch=selected_batch)
+    user = get_user(user_id)
+    
+    await query.edit_message_text(
         f"✅ <b>ምዝገባዎ ተጠናቋል!</b>\n\n"
         f"👤 <b>ስም:</b> {user['name']}\n"
-        f"📞 <b>ስልክ:</b> {user['phone']}\n\n"
+        f"📞 <b>ስልክ:</b> {user['phone']}\n"
+        f"🎓 <b>ባች:</b> {user['batch']}\n\n"
         f"አሁን <b>'💳 ክፍያ ፈፅም'</b> የሚለውን በመጫን ደረሰኝ ማስገባት ይችላሉ።",
         reply_markup=main_menu(user_id),
         parse_mode=ParseMode.HTML
@@ -332,6 +366,7 @@ async def receive_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📩 <b>አዲስ የክፍያ ደረሰኝ ደርሷል!</b>\n\n"
         f"👤 <b>ስም:</b> {user['name']}\n"
         f"📞 <b>ስልክ:</b> {user['phone']}\n"
+        f"🎓 <b>ባች:</b> {user['batch']}\n"
         f"🆔 <b>User ID:</b> <code>{user_id}</code>"
     )
     await context.bot.send_photo(
@@ -419,6 +454,7 @@ async def show_paid_users_list(query, context):
             text += (
                 f"{idx}. <b>ስም:</b> {u['name']}\n"
                 f"   <b>ስልክ:</b> {u['phone']}\n"
+                f"   <b>ባች:</b> {u['batch']}\n"
                 f"   <b>የተከፈለበት ቀን:</b> {u['payment_date']}\n"
                 f"   <b>ID:</b> <code>{u['user_id']}</code>\n"
                 f"   -------------------\n"
@@ -537,6 +573,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📋 <b>የመገለጫ መረጃ</b>\n\n"
             f"• <b>ስም:</b> {user['name']}\n"
             f"• <b>ስልክ:</b> {user['phone']}\n"
+            f"• <b>ባች:</b> {user['batch']}\n"
             f"• <b>የክፍያ ሁኔታ:</b> {user['payment_status']}\n"
             f"• <b>መጨረሻ የተከፈለው:</b> {p_date}\n"
             f"• <b>የአካውንት ባላንስ:</b> {user['balance']} ETB"
@@ -592,6 +629,7 @@ if __name__ == '__main__':
         states={
             REG_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             REG_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)],
+            REG_BATCH: [CallbackQueryHandler(get_batch, pattern='^reg_batch_')],
         },
         fallbacks=[
             CommandHandler('cancel', cancel),
@@ -638,3 +676,4 @@ if __name__ == '__main__':
 
     print("🚀 ቦቱ Render ላይ በተሳካ ሁኔታ ስራ ጀምሯል...")
     app.run_polling()
+
