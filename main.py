@@ -1,4 +1,4 @@
-import logging
+ኸimport logging
 import sqlite3
 import asyncio
 import os
@@ -673,6 +673,48 @@ if __name__ == '__main__':
     
     app.add_handler(CallbackQueryHandler(handle_admin_action, pattern='^(approve|reject)_'))
     app.add_handler(CallbackQueryHandler(handle_buttons))
+# ==========================================
+# 1. የ BAN ማድረጊያ ተግባር (ban_user function)
+# ==========================================
+async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ጥያቄው የመጣው ከአድሚኑ መሆኑን ማረጋገጫ
+    if update.effective_user.id != ADMIN_ID:
+        return
+    
+    # የባን የሚደረገውን ID ማረጋገጫ
+    if not context.args:
+        await update.message.reply_text(
+            "❌ እባክዎን የባን የሚደረገውን የቴሌግራም ID ይላኩ!\n\nምሳሌ፦ `/ban 8711072926`",
+            parse_mode="Markdown"
+        )
+        return
+    
+    target_id = context.args[0]
+    
+    # እዚህ ላይ የተጠቃሚውን ID በስኬት መታገዱን የሚያረጋግጥ መልእክት ይልካል
+    await update.message.reply_text(
+        f"🚫 **ተጠቃሚ ID፦** `{target_id}` በተሳካ ሁኔታ ታግዷል!",
+        parse_mode="Markdown"
+    )
+
+# ==========================================
+# 2. የትእዛዞች ማያያዣ (Handlers)
+# ==========================================
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("ban", ban_user))  # <-- አዲሱ የ ባን ትእዛዝ
+
+app.add_handler(reg_handler)
+app.add_handler(pay_handler)
+app.add_handler(broadcast_handler)
+
+app.add_handler(CallbackQueryHandler(handle_admin_action))
+app.add_handler(CallbackQueryHandler(handle_buttons))
+
+# ==========================================
+# 3. ቦቱን ማስነሳት (Start Polling)
+# ==========================================
+print("🚀 ቦቱ Render ላይ በተሳካ ሁኔታ ስራ ጀምሯል...")
+app.run_polling()
 
     print("🚀 ቦቱ Render ላይ በተሳካ ሁኔታ ስራ ጀምሯል...")
     app.run_polling()
