@@ -17,7 +17,7 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# Render Port Health Check Server (Render ቦቱን እንዳይዘጋው የሚያስችል)
+# ------------------ Render Port Health Check Server ------------------
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -30,7 +30,7 @@ def run_health_server():
     server.serve_forever()
 
 # ------------------ 1. መቼቶች (Configuration) ------------------
-TOKEN="8594676233:AAG8a-pu7O99Kp6QqDiwCzm65bYD7S8Urh8"
+TOKEN = "8594676233:AAG8a-pu7O99Kp6QqDiwCzm65bYD7S8Urh8"
 ADMIN_ID = 7857140781
 VIP_LINK = "https://t.me/+YourVIPPrivateChannelLinkHere"
 
@@ -59,7 +59,6 @@ def init_db():
         )
     ''')
     
-    # ነባር ዳታቤዝ ካለ የ batch ኮለምን ማከል
     try:
         cursor.execute('ALTER TABLE users ADD COLUMN batch TEXT DEFAULT "ያልተመረጠ"')
     except Exception:
@@ -500,6 +499,74 @@ async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
+# ------------------ Admin Ban / Unban Functions ------------------
+
+async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "⚠️ <b>የተጠቃሚውን ID አብረው ይጻፉ!</b>\n\n<b>ምሳሌ፦</b> <code>/ban 8711072926</code>", 
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    try:
+        target_id = int(context.args[0])
+        user = get_user(target_id)
+        if not user:
+            await update.message.reply_text("❌ ይህ ተጠቃሚ በዳታቤዝ ውስጥ አልተገኘም።")
+            return
+
+        update_user(target_id, is_banned=1)
+        await update.message.reply_text(
+            f"🚫 ተጠቃሚ <b>{user['name']}</b> (ID: <code>{target_id}</code>) በተሳካ ሁኔታ ታግዷል!", 
+            parse_mode=ParseMode.HTML
+        )
+        
+        try:
+            await context.bot.send_message(
+                chat_id=target_id, 
+                text="❌ <b>እርስዎ ከዚህ ቦት በአድሚኑ ታግደዋል!</b>", 
+                parse_mode=ParseMode.HTML
+            )
+        except Exception:
+            pass
+
+    except ValueError:
+        await update.message.reply_text("⚠️ እባክዎን ትክክለኛ የቁጥር ID ያስገቡ!")
+
+
+async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "⚠️ <b>የተጠቃሚውን ID አብረው ይጻፉ!</b>\n\n<b>ምሳሌ፦</b> <code>/unban 8711072926</code>", 
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    try:
+        target_id = int(context.args[0])
+        user = get_user(target_id)
+        if not user:
+            await update.message.reply_text("❌ ይህ ተጠቃሚ በዳታቤዝ ውስጥ አልተገኘም።")
+            return
+
+        update_user(target_id, is_banned=0)
+        await update.message.reply_text(
+            f"✅ ተጠቃሚ <b>{user['name']}</b> (ID: <code>{target_id}</code>) ከእገዳ ነፃ ወጥቷል!", 
+            parse_mode=ParseMode.HTML
+        )
+
+    except ValueError:
+        await update.message.reply_text("⚠️ እባክዎን ትክክለኛ የቁጥር ID ያስገቡ!")
+
+# ------------------ Other Button Handlers ------------------
+
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await is_banned(update):
         return
@@ -665,56 +732,19 @@ if __name__ == '__main__':
         allow_reentry=True
     )
 
+    # ------------------ Command Handlers ------------------
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ban", ban_user))
+    app.add_handler(CommandHandler("unban", unban_user))
+    
+    # ------------------ Conversation Handlers ------------------
     app.add_handler(reg_handler)
     app.add_handler(pay_handler)
     app.add_handler(broadcast_handler)
     
+    # ------------------ Callback Handlers ------------------
     app.add_handler(CallbackQueryHandler(handle_admin_action, pattern='^(approve|reject)_'))
     app.add_handler(CallbackQueryHandler(handle_buttons))
-# ==========================================
-# 1. የ BAN ማድረጊያ ተግባር (ban_user function)
-# ==========================================
-async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ጥያቄው የመጣው ከአድሚኑ መሆኑን ማረጋገጫ
-    if update.effective_user.id != ADMIN_ID:
-        return
-    
-    # የባን የሚደረገውን ID ማረጋገጫ
-    if not context.args:
-        await update.message.reply_text(
-            "❌ እባክዎን የባን የሚደረገውን የቴሌግራም ID ይላኩ!\n\nምሳሌ፦ `/ban 8711072926`",
-            parse_mode="Markdown"
-        )
-        return
-    
-    target_id = context.args[0]
-    
-    # እዚህ ላይ የተጠቃሚውን ID በስኬት መታገዱን የሚያረጋግጥ መልእክት ይልካል
-    await update.message.reply_text(
-        f"🚫 **ተጠቃሚ ID፦** `{target_id}` በተሳካ ሁኔታ ታግዷል!",
-        parse_mode="Markdown"
-    )
-
-# ==========================================
-# 2. የትእዛዞች ማያያዣ (Handlers)
-# ==========================================
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("ban", ban_user))  # <-- አዲሱ የ ባን ትእዛዝ
-
-app.add_handler(reg_handler)
-app.add_handler(pay_handler)
-app.add_handler(broadcast_handler)
-
-app.add_handler(CallbackQueryHandler(handle_admin_action))
-app.add_handler(CallbackQueryHandler(handle_buttons))
-
-# ==========================================
-# 3. ቦቱን ማስነሳት (Start Polling)
-# ==========================================
-print("🚀 ቦቱ Render ላይ በተሳካ ሁኔታ ስራ ጀምሯል...")
-app.run_polling()
 
     print("🚀 ቦቱ Render ላይ በተሳካ ሁኔታ ስራ ጀምሯል...")
     app.run_polling()
