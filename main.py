@@ -1,4 +1,4 @@
-ኸimport logging
+import logging
 import sqlite3
 import asyncio
 import os
