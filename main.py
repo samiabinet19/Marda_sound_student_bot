@@ -30,7 +30,7 @@ def run_health_server():
     server.serve_forever()
 
 # ------------------ 1. መቼቶች (Configuration) ------------------
-TOKEN = "8594676233:AAFd1BKH5RBm4WWTNeWY_YCbKVE8ugp3WL4"
+TOKEN = "8594676233:AAG8a-pu7O99Kp6QqDiwCzm65bYD7S8Urh8"
 ADMIN_ID = 7857140781
 VIP_LINK = "https://t.me/+YourVIPPrivateChannelLinkHere"
 
