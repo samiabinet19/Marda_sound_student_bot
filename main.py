@@ -666,7 +666,7 @@ if __name__ == '__main__':
     )
 
     app.add_handler(CommandHandler("start", start))
-    
+    app.add_handler(CommandHandler("ban", ban_user))
     app.add_handler(reg_handler)
     app.add_handler(pay_handler)
     app.add_handler(broadcast_handler)
