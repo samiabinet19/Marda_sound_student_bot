@@ -31,7 +31,10 @@ def run_health_server():
 
 # ------------------ 1. መቼቶች (Configuration) ------------------
 TOKEN = "8594676233:AAG8a-pu7O99Kp6QqDiwCzm65bYD7S8Urh8"
-ADMIN_ID = 7857140781
+
+# 🟢 ሁለት አድሚኖች እዚህ ተካተውበታል
+ADMIN_IDS = [7857140781, 7619940687]
+
 VIP_LINK = "https://t.me/+YourVIPPrivateChannelLinkHere"
 
 logging.basicConfig(
@@ -40,9 +43,22 @@ logging.basicConfig(
 )
 
 DB_NAME = "bot_database.db"
+BASE_BATCH_DIR = "batch_folders"
 
-# ------------------ 2. SQLite Database Functions ------------------
+def is_admin(user_id: int) -> bool:
+    """ ተጠቃሚው አድሚን መሆኑን ያረጋግጣል """
+    return user_id in ADMIN_IDS
+
+# ------------------ 2. ፎልደር እና SQLite Database ዝግጅት ------------------
+def init_batch_folders():
+    """ ከባች 15 እስከ ባች 50 ያሉ ፎልደሮችን በራሱ ይፈጥራል """
+    os.makedirs(BASE_BATCH_DIR, exist_ok=True)
+    for b in range(15, 51):
+        folder_path = os.path.join(BASE_BATCH_DIR, f"Batch_{b}")
+        os.makedirs(folder_path, exist_ok=True)
+
 def init_db():
+    """ ዳታቤዝ ይፈጥራል፤ አሮጌ መረጃዎችን ሳይሰርዝ ይይዛል """
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
@@ -228,9 +244,24 @@ def main_menu(user_id: int) -> InlineKeyboardMarkup:
         
     keyboard.append([InlineKeyboardButton("📞 ግንኙነት (Contact)", callback_data='contact')])
 
-    if user_id == ADMIN_ID:
+    # 🟢 ከሁለቱ አድሚኖች አንዱ ከሆነ የአድሚን ገጽ ቁልፍ ይታያል
+    if is_admin(user_id):
         keyboard.append([InlineKeyboardButton("⚙️ የአድሚን ገጽ (Admin)", callback_data='admin_panel')])
         
+    return InlineKeyboardMarkup(keyboard)
+
+def get_batches_keyboard() -> InlineKeyboardMarkup:
+    """ ከባች 15 እስከ 50 በ 3 ረድፍ የተደረደሩ ቁልፎች """
+    keyboard = []
+    row = []
+    for b in range(15, 51):
+        b_name = f"{b}ኛ ባች"
+        row.append(InlineKeyboardButton(f"{b}ኛ", callback_data=f"reg_batch_{b_name}"))
+        if len(row) == 3:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
     return InlineKeyboardMarkup(keyboard)
 
 def back_menu() -> InlineKeyboardMarkup:
@@ -287,16 +318,9 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     update_user(user_id, phone=update.message.text)
     
-    keyboard = [
-        [InlineKeyboardButton("16ኛ ባች (Batch 16)", callback_data='reg_batch_16ኛ ባች'), InlineKeyboardButton("17ኛ ባች (Batch 17)", callback_data='reg_batch_17ኛ ባች')],
-        [InlineKeyboardButton("18ኛ ባች (Batch 18)", callback_data='reg_batch_18ኛ ባች'), InlineKeyboardButton("19ኛ ባች (Batch 19)", callback_data='reg_batch_19ኛ ባች')],
-        [InlineKeyboardButton("20ኛ ባች (Batch 20)", callback_data='reg_batch_20ኛ ባች'), InlineKeyboardButton("21ኛ ባች (Batch 21)", callback_data='reg_batch_21ኛ ባች')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
     await update.message.reply_text(
-        "አሁን ደግሞ <b>የተመደቡበትን ባች (ክፍል)</b> ይምረጡ፡",
-        reply_markup=reply_markup,
+        "አሁን ደግሞ <b>የተመደቡበትን ባች (ከባች 15 - ባች 50)</b> ይምረጡ፡",
+        reply_markup=get_batches_keyboard(),
         parse_mode=ParseMode.HTML
     )
     return REG_BATCH
@@ -341,12 +365,30 @@ async def receive_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await is_banned(update):
         return ConversationHandler.END
     user_id = update.effective_user.id
-    photo_file_id = update.message.photo[-1].file_id
+    photo = update.message.photo[-1]
+    photo_file_id = photo.file_id
     
     add_user_if_not_exists(user_id)
     update_user(user_id, payment_status='በማረጋገጥ ላይ (Pending)')
     user = get_user(user_id)
     
+    # ------------------ ደረሰኙን በየባቹ ፎልደር ውስጥ ሴቭ ማድረግ ------------------
+    user_batch = user.get('batch', '')
+    if user_batch and "ባች" in user_batch:
+        batch_num = ''.join(filter(str.isdigit, user_batch))
+        if batch_num:
+            target_folder = os.path.join(BASE_BATCH_DIR, f"Batch_{batch_num}")
+            os.makedirs(target_folder, exist_ok=True)
+            
+            try:
+                receipt_file = await context.bot.get_file(photo_file_id)
+                time_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                file_name = f"user_{user_id}_{time_stamp}.jpg"
+                file_path = os.path.join(target_folder, file_name)
+                await receipt_file.download_to_drive(file_path)
+            except Exception as e:
+                logging.error(f"Failed to save image in batch folder: {e}")
+
     record_payment_history(user_id, photo_file_id, "በማረጋገጥ ላይ")
     
     await update.message.reply_text(
@@ -368,13 +410,20 @@ async def receive_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎓 <b>ባች:</b> {user['batch']}\n"
         f"🆔 <b>User ID:</b> <code>{user_id}</code>"
     )
-    await context.bot.send_photo(
-        chat_id=ADMIN_ID,
-        photo=photo_file_id,
-        caption=caption,
-        reply_markup=admin_markup,
-        parse_mode=ParseMode.HTML
-    )
+
+    # 🟢 ደረሰኙ ለሁለቱም አድሚኖች ይላካል
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_photo(
+                chat_id=admin_id,
+                photo=photo_file_id,
+                caption=caption,
+                reply_markup=admin_markup,
+                parse_mode=ParseMode.HTML
+            )
+        except Exception as e:
+            logging.error(f"Failed to send to admin {admin_id}: {e}")
+            
     return ConversationHandler.END
 
 async def invalid_receipt_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -387,7 +436,7 @@ async def invalid_receipt_format(update: Update, context: ContextTypes.DEFAULT_T
 async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin(update.effective_user.id):
         return
 
     data = query.data.split('_')
@@ -471,7 +520,7 @@ async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return BROADCAST_STATE
 
 async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin(update.effective_user.id):
         return ConversationHandler.END
         
     broadcast_msg = update.message.text
@@ -494,7 +543,7 @@ async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
     await update.message.reply_text(
         f"✅ <b>ብሮድካስት ተጠናቋል!</b>\n\n• በተሳካ ሁኔታ የደረሳቸው: {success}\n• ያልደረሳቸው: {failed}",
-        reply_markup=main_menu(ADMIN_ID),
+        reply_markup=main_menu(update.effective_user.id),
         parse_mode=ParseMode.HTML
     )
     return ConversationHandler.END
@@ -502,7 +551,7 @@ async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ------------------ Admin Ban / Unban Functions ------------------
 
 async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin(update.effective_user.id):
         return
 
     if not context.args:
@@ -537,9 +586,8 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("⚠️ እባክዎን ትክክለኛ የቁጥር ID ያስገቡ!")
 
-
 async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin(update.effective_user.id):
         return
 
     if not context.args:
@@ -581,10 +629,10 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == 'main':
         await start(update, context)
         
-    elif query.data == 'show_paid_only' and user_id == ADMIN_ID:
+    elif query.data == 'show_paid_only' and is_admin(user_id):
         await show_paid_users_list(query, context)
 
-    elif query.data == 'force_check_payments' and user_id == ADMIN_ID:
+    elif query.data == 'force_check_payments' and is_admin(user_id):
         await query.edit_message_text("⏳ ክፍያዎች እየተፈተሹ ነው...")
         await check_expired_payments_logic(context.bot)
         await query.edit_message_text("✅ የክፍያ ማስታወሻዎች በተሳካ ሁኔታ ተላኩ!", reply_markup=back_menu())
@@ -666,7 +714,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(contact_text, reply_markup=back_menu(), parse_mode=ParseMode.HTML)
         
     elif query.data == 'admin_panel':
-        if user_id == ADMIN_ID:
+        if is_admin(user_id):
             await show_admin_panel(query, context)
         else:
             await query.edit_message_text("❌ ይህንን ገጽ ለማየት ፈቃድ የሎትም።", reply_markup=back_menu())
@@ -688,6 +736,7 @@ if __name__ == '__main__':
     threading.Thread(target=run_health_server, daemon=True).start()
 
     init_db()
+    init_batch_folders()  # ከባች 15 እስከ 50 ያሉ ፎልደሮች በራሱ ይፈጠራሉ
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
