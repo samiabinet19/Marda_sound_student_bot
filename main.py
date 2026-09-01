@@ -31,7 +31,7 @@ def run_health_server():
 
 # ------------------ 1. መቼቶች (Configuration) ------------------
 TOKEN = "8594676233:AAG8a-pu7O99Kp6QqDiwCzm65bYD7S8Urh8"
-ADMIN_ID = 7857140781
+ADMIN_ID = 7857140781.7619940687
 VIP_LINK = "https://t.me/+YourVIPPrivateChannelLinkHere"
 
 logging.basicConfig(
