@@ -30,7 +30,7 @@ def run_health_server():
     server.serve_forever()
 
 # ------------------ 1. መቼቶች (Configuration) ------------------
-TOKEN = "8594676233:AAGIvsi1NA2gwngRv7PDTT8lhjIW8VHGLXE"
+TOKEN = "8594676233:AAF_Jl38ATSLUouYpN0ZLKAy9W77kbBi5nw"
 
 # 🟢 ሁለቱ አድሚኖች
 ADMIN_IDS = [7857140781, 7619940687]
@@ -160,7 +160,7 @@ def get_users_by_batch(batch_name: str):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT user_id, name, phone, payment_status, payment_date, is_banned
+        SELECT user_id, name, phone, payment_status, payment_date 
         FROM users 
         WHERE batch = ?
     ''', (batch_name,))
@@ -174,8 +174,7 @@ def get_users_by_batch(batch_name: str):
             'name': row[1],
             'phone': row[2],
             'payment_status': row[3],
-            'payment_date': row[4],
-            'is_banned': row[5]
+            'payment_date': row[4]
         })
     return users
 
@@ -254,7 +253,6 @@ async def background_payment_checker(app):
 REG_NAME, REG_PHONE, REG_BATCH = range(3)
 PAY_RECEIPT = 3
 BROADCAST_STATE = 4
-BATCH_MSG_STATE, BATCH_PDF_STATE = range(5, 7)
 
 def main_menu(user_id: int) -> InlineKeyboardMarkup:
     user = get_user(user_id)
@@ -307,7 +305,7 @@ async def is_banned(update: Update) -> bool:
         return True
     return False
 
-# ------------------ 5. User Registration & Payment Handlers ------------------
+# ------------------ 5. Handlers ------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await is_banned(update):
@@ -398,6 +396,7 @@ async def receive_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     update_user(user_id, payment_status='በማረጋገጥ ላይ (Pending)')
     user = get_user(user_id)
     
+    # ------------------ ደረሰኙን በየባቹ ፎልደር ውስጥ ሴቭ ማድረግ ------------------
     user_batch = user.get('batch', '')
     if user_batch and "ባች" in user_batch:
         batch_num = ''.join(filter(str.isdigit, user_batch))
@@ -496,7 +495,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             parse_mode=ParseMode.HTML
         )
 
-# ------------------ 6. የአድሚን ክፍሎች (Admin Dashboard & Batch Announcements) ------------------
+# ------------------ የአድሚን ክፍሎች ------------------
 
 async def show_admin_panel(query, context):
     all_users = get_all_users()
@@ -506,20 +505,20 @@ async def show_admin_panel(query, context):
         f"⚙️ <b>የአድሚን መቆጣጠሪያ Dashboard</b>\n\n"
         f"👥 <b>ጠቅላላ ተጠቃሚዎች:</b> {len(all_users)}\n"
         f"✅ <b>ከፍለው ደረሰኝ ያፀደቁ:</b> {len(paid_users)} ተጠቃሚዎች\n\n"
-        f"ከታች ያሉትን ቁልፎች በመጠቀም ዝርዝር ማየት እና ማስታወቂያ መላክ ይችላሉ፦"
+        f"ከታች ያሉትን ቁልፎች በመጠቀም ዝርዝር ማየት ይችላሉ፡"
     )
             
     admin_buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ ከፍለው ደረሰኝ የላኩ ብቻ (Paid)", callback_data='show_paid_only')],
-        [InlineKeyboardButton("📁 በባች አስተዳድር/ማስታወቂያ ላክ (Manage Batch)", callback_data='show_batch_menu')],
-        [InlineKeyboardButton("📢 ለአጠቃላይ ተጠቃሚ መልእክት (General Broadcast)", callback_data='start_broadcast')],
+        [InlineKeyboardButton("📁 በባች ከፍለሽ እዪ (View by Batch)", callback_data='show_batch_menu')],
+        [InlineKeyboardButton("📢 መልእክት በት (Broadcast)", callback_data='start_broadcast')],
         [InlineKeyboardButton("🔄 ክፍያዎችን በግድ ፈትሽ", callback_data='force_check_payments')],
         [InlineKeyboardButton("⬅️ ወደ ዋና ማውጫ", callback_data='main')]
     ])
     await query.edit_message_text(report, reply_markup=admin_buttons, parse_mode=ParseMode.HTML)
 
 async def show_batch_selector_admin(query, context):
-    """ አድሚኑ ከባች 15 - 50 መርጦ ማስታወቂያ የሚልክበትን ወይም ሰዎችን የሚያይበትን ቁልፎች ያዘጋጃል """
+    """ አድሚኑ ከባች 15 - 50 መርጦ የውስጡን ሰዎች እንዲያይ ያደርጋል """
     keyboard = []
     row = []
     for b in range(15, 51):
@@ -534,23 +533,10 @@ async def show_batch_selector_admin(query, context):
     keyboard.append([InlineKeyboardButton("⬅️ ወደ አድሚን ገጽ", callback_data='admin_panel')])
     
     await query.edit_message_text(
-        "📁 <b>የትኛውን ባች ማስተዳደር/ማስታወቂያ መላክ ትፈልጋለህ?</b>\n\nማየት የሚፈልጉትን ባች ይምረጡ፦",
+        "📁 <b>የትኛውን ባች ማየት ትፈልጊያለሽ?</b>\n\nማየት የሚፈልጉትን ባች ይምረጡ፡",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode=ParseMode.HTML
     )
-
-async def show_batch_options_menu(query, context, batch_name):
-    """ የተመረጠው ባች ላይ አድሚኑ ማድረግ የሚችላቸውን አማራጮች ያሳያል """
-    users = get_users_by_batch(batch_name)
-    text = f"📂 <b>የ {batch_name} መቆጣጠሪያ</b>\n\nበዚህ ባች ውስጥ የተመዘገቡ ተጠቃሚዎች ብዛት፦ <b>{len(users)}</b>\n\nእባክዎን ማድረግ የሚፈልጉትን ይምረጡ፦"
-    
-    buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💬 የጽሑፍ ማስታወቂያ ላክ", callback_data=f"btn_send_txt_{batch_name}")],
-        [InlineKeyboardButton("📄 PDF/ሰነድ ማስታወቂያ ላክ", callback_data=f"btn_send_pdf_{batch_name}")],
-        [InlineKeyboardButton("📋 አባላቱን ዝርዝር እይ", callback_data=f"btn_list_users_{batch_name}")],
-        [InlineKeyboardButton("⬅️ ወደ ባች መረጣ ተመለስ", callback_data='show_batch_menu')]
-    ])
-    await query.edit_message_text(text, reply_markup=buttons, parse_mode=ParseMode.HTML)
 
 async def display_specific_batch_users(query, context, batch_name):
     """ የተመረጠው ባች ውስጥ ያሉትን አባላት ዝርዝር ያሳያል """
@@ -570,122 +556,10 @@ async def display_specific_batch_users(query, context, batch_name):
             )
             
     buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⬅️ ወደ ባች አማራጭ ተመለስ", callback_data=f"adm_batch_{batch_name}")],
+        [InlineKeyboardButton("⬅️ ወደ ባች ዝርዝር ተመለስ", callback_data='show_batch_menu')],
         [InlineKeyboardButton("⬅️ ወደ አድሚን ገጽ", callback_data='admin_panel')]
     ])
     await query.edit_message_text(text, reply_markup=buttons, parse_mode=ParseMode.HTML)
-
-# --- 🟢 በየባቹ ማስታወቂያ መላኪያ Handlers (Text & PDF) ---
-
-async def prompt_batch_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    batch_name = query.data.replace('btn_send_txt_', '')
-    context.user_data['target_batch'] = batch_name
-    
-    await query.edit_message_text(
-        f"💬 <b>ለ{batch_name} የሚላክ የጽሑፍ ማስታወቂያ</b>\n\n"
-        f"ለ <b>{batch_name}</b> ተማሪዎች ብቻ እንዲላክ የሚፈልጉትን መልእክት ይፃፉ፦\n\n"
-        f"(ለማቋረጥ /cancel ይበሉ)",
-        parse_mode=ParseMode.HTML
-    )
-    return BATCH_MSG_STATE
-
-async def send_batch_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return ConversationHandler.END
-        
-    batch_name = context.user_data.get('target_batch')
-    msg_text = update.message.text
-    users = get_users_by_batch(batch_name)
-    
-    if not users:
-        await update.message.reply_text(f"❌ በ{batch_name} ውስጥ የተመዘገበ ምንም ተጠቃሚ አልተገኘም።")
-        return ConversationHandler.END
-
-    success, failed = 0, 0
-    await update.message.reply_text(f"⏳ መልእክቱ ለ {batch_name} ተማሪዎች እየተላከ ነው...")
-    
-    for u in users:
-        if u['is_banned'] == 0:
-            try:
-                await context.bot.send_message(
-                    chat_id=u['user_id'],
-                    text=f"📢 <b>የ{batch_name} ማስታወቂያ፦</b>\n\n{msg_text}",
-                    parse_mode=ParseMode.HTML
-                )
-                success += 1
-            except Exception:
-                failed += 1
-
-    await update.message.reply_text(
-        f"✅ <b>የ{batch_name} ማስታወቂያ ተላከ!</b>\n\n• በተሳካ ሁኔታ የደረሳቸው: {success}\n• ያልደረሳቸው: {failed}",
-        reply_markup=main_menu(update.effective_user.id),
-        parse_mode=ParseMode.HTML
-    )
-    return ConversationHandler.END
-
-async def prompt_batch_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    batch_name = query.data.replace('btn_send_pdf_', '')
-    context.user_data['target_batch'] = batch_name
-    
-    await query.edit_message_text(
-        f"📄 <b>ለ{batch_name} የሚላክ PDF / ሰነድ ማስታወቂያ</b>\n\n"
-        f"እባክዎን ለ <b>{batch_name}</b> የሚላከውን PDF ፋይል እዚህ ያያይዙልን (Upload)።\n"
-        f"<i>(ፋይሉ በራስ-ሰር በ {batch_name} ፎልደር ውስጥ ይቀመጣል!)</i>\n\n"
-        f"(ለማቋረጥ /cancel ይበሉ)",
-        parse_mode=ParseMode.HTML
-    )
-    return BATCH_PDF_STATE
-
-async def send_batch_pdf_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return ConversationHandler.END
-        
-    batch_name = context.user_data.get('target_batch')
-    doc = update.message.document
-    caption = update.message.caption or f"📄 የ{batch_name} ማስታወቂያ PDF"
-    
-    batch_num = ''.join(filter(str.isdigit, batch_name))
-    target_folder = os.path.join(BASE_BATCH_DIR, f"Batch_{batch_num}")
-    os.makedirs(target_folder, exist_ok=True)
-    
-    file_path = os.path.join(target_folder, doc.file_name or f"announcement_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
-    
-    await update.message.reply_text(f"⏳ ፋይሉ በ {batch_name} ፎልደር ውስጥ እየተቀመጠ እና ለተማሪዎች እየተላከ ነው...")
-    
-    try:
-        file_obj = await context.bot.get_file(doc.file_id)
-        await file_obj.download_to_drive(file_path)
-    except Exception as e:
-        logging.error(f"Failed to save PDF in batch folder: {e}")
-
-    users = get_users_by_batch(batch_name)
-    success, failed = 0, 0
-    
-    for u in users:
-        if u['is_banned'] == 0:
-            try:
-                await context.bot.send_document(
-                    chat_id=u['user_id'],
-                    document=doc.file_id,
-                    caption=f"📢 <b>የ{batch_name} ማስታወቂያ PDF፦</b>\n\n{caption}",
-                    parse_mode=ParseMode.HTML
-                )
-                success += 1
-            except Exception:
-                failed += 1
-
-    await update.message.reply_text(
-        f"✅ <b>የ{batch_name} PDF ማስታወቂያ በተሳካ ሁኔታ ተላከ!</b>\n\n"
-        f"📂 <b>የተቀመጠበት ፎልደር:</b> <code>{file_path}</code>\n"
-        f"• በተሳካ ሁኔታ የደረሳቸው: {success}\n• ያልደረሳቸው: {failed}",
-        reply_markup=main_menu(update.effective_user.id),
-        parse_mode=ParseMode.HTML
-    )
-    return ConversationHandler.END
-
-# ------------------ 7. General Admin Broadcast, Revoke & Ban Handlers ------------------
 
 async def show_paid_users_list(query, context):
     paid_users = get_paid_users_only()
@@ -710,7 +584,7 @@ async def show_paid_users_list(query, context):
 async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.edit_message_text(
-        "📢 <b>አጠቃላይ የብሮድካስት መልእክት</b>\n\nለሁሉም ተጠቃሚዎች እንዲላክ የሚፈልጉትን መልእክት ይጻፉልኝ፡\n\n(ለማቋረጥ /cancel ይበሉ)",
+        "📢 <b>የብሮድካስት መልእክት</b>\n\nለሁሉም ተጠቃሚዎች እንዲላክ የሚፈልጉትን መልእክት ይጻፉልኝ፡\n\n(ለማቋረጥ /cancel ይበሉ)",
         parse_mode=ParseMode.HTML
     )
     return BROADCAST_STATE
@@ -744,47 +618,7 @@ async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
-# 🟢 አዲስ የተጨመረ፦ ክፍያን ለመሰረዝ እና ከባች ለማስወጣት የሚያስችል የ /revoke ትእዛዝ
-async def revoke_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return
-
-    if not context.args:
-        await update.message.reply_text(
-            "⚠️ <b>የተጠቃሚውን ID አብረው ይጻፉ!</b>\n\n<b>ምሳሌ፦</b> <code>/revoke 8711072926</code>", 
-            parse_mode=ParseMode.HTML
-        )
-        return
-
-    try:
-        target_id = int(context.args[0])
-        user = get_user(target_id)
-        
-        if not user:
-            await update.message.reply_text("❌ ይህ ተጠቃሚ በዳታቤዝ ውስጥ አልተገኘም።")
-            return
-
-        # ክፍያውን ሰርዞ፣ ባላንስ 0 አድርጎ ባቹን ወደ "ያልተመረጠ" ይመልሰዋል
-        update_user(target_id, payment_status='ተሰርዟል (Rejected)', balance=0.0, batch='ያልተመረጠ')
-        
-        user_name = user.get('name', 'ተጠቃሚ')
-        await update.message.reply_text(
-            f"🔄 ተጠቃሚ <b>{user_name}</b> (ID: <code>{target_id}</code>) ክፍያው ተሰርዞ ከባቹ ተወግዷል!", 
-            parse_mode=ParseMode.HTML
-        )
-        
-        # ለተጠቃሚው ማሳሰቢያ ይልካል
-        try:
-            await context.bot.send_message(
-                chat_id=target_id, 
-                text="⚠️ <b>ማሳሰቢያ፦</b> የክፍያ ማረጋገጫዎ ተሰርዟል! እባክዎን እንደገና ትክክለኛ ደረሰኝ ያስገቡ።", 
-                parse_mode=ParseMode.HTML
-            )
-        except Exception:
-            pass
-
-    except ValueError:
-        await update.message.reply_text("⚠️ እባክዎን ትክክለኛ የቁጥር ID ያስገቡ!")
+# ------------------ Admin Ban / Unban ------------------
 
 async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -849,7 +683,7 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("⚠️ እባክዎን ትክክለኛ የቁጥር ID ያስገቡ!")
 
-# ------------------ 8. Other Button Handlers ------------------
+# ------------------ Other Button Handlers ------------------
 
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await is_banned(update):
@@ -873,10 +707,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data.startswith('adm_batch_') and is_admin(user_id):
         batch_name = query.data.replace('adm_batch_', '')
-        await show_batch_options_menu(query, context, batch_name)
-
-    elif query.data.startswith('btn_list_users_') and is_admin(user_id):
-        batch_name = query.data.replace('btn_list_users_', '')
         await display_specific_batch_users(query, context, batch_name)
 
     elif query.data == 'force_check_payments' and is_admin(user_id):
@@ -974,7 +804,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.edit_message_text("❌ ሂደቱ ተቋርጧል።", reply_markup=main_menu(user_id))
     return ConversationHandler.END
 
-# ------------------ 9. ዋና ማስኪያጃ (Main Execution) ------------------
+# ------------------ 6. ዋና ማስኪያጃ (Main Execution) ------------------
 async def post_init(app):
     asyncio.create_task(background_payment_checker(app))
 
@@ -1027,36 +857,16 @@ if __name__ == '__main__':
         allow_reentry=True
     )
 
-    batch_announcement_handler = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(prompt_batch_msg, pattern='^btn_send_txt_'),
-            CallbackQueryHandler(prompt_batch_pdf, pattern='^btn_send_pdf_')
-        ],
-        states={
-            BATCH_MSG_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_batch_text_message)],
-            BATCH_PDF_STATE: [MessageHandler(filters.Document.ALL, send_batch_pdf_document)],
-        },
-        fallbacks=[
-            CommandHandler('cancel', cancel),
-            CallbackQueryHandler(cancel, pattern='^main$')
-        ],
-        allow_reentry=True
-    )
-
-    # የትእዛዝ (Command) ማያያዣዎች
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ban", ban_user))
     app.add_handler(CommandHandler("unban", unban_user))
-    app.add_handler(CommandHandler("revoke", revoke_user))  # 🟢 አዲስ የተጨመረ የ /revoke Handler
     
     app.add_handler(reg_handler)
     app.add_handler(pay_handler)
     app.add_handler(broadcast_handler)
-    app.add_handler(batch_announcement_handler)
     
     app.add_handler(CallbackQueryHandler(handle_admin_action, pattern='^(approve|reject)_'))
     app.add_handler(CallbackQueryHandler(handle_buttons))
 
     print("🚀 ቦቱ Render ላይ በተሳካ ሁኔታ ስራ ጀምሯል...")
-    app.run_polling(drop_pending_updates=True)
-
+    app.run_polling()
