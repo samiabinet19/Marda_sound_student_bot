@@ -60,9 +60,13 @@ def init_batch_folders():
         os.makedirs(folder_path, exist_ok=True)
 
 def init_db():
-    """ ዳታቤዝ ይፈጥራል፤ አሮጌ መረጃዎችን ሳይሰርዝ ይይዛል """
-    conn = sqlite3.connect(DB_NAME)
+    """ ዳታቤዝ ይፈጥራል፤ WAL mode በማብራት ላትና ላግ ያስወግዳል """
+    conn = sqlite3.connect(DB_NAME, timeout=30.0)
     cursor = conn.cursor()
+    
+    # 🟢 SQLite Concurrency ማሻሻያ (ላግ እና ሎክ እንዳያደርግ)
+    cursor.execute('PRAGMA journal_mode=WAL;')
+    cursor.execute('PRAGMA synchronous=NORMAL;')
     
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
@@ -97,7 +101,7 @@ def init_db():
     conn.close()
 
 def get_user(user_id: int):
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=30.0)
     cursor = conn.cursor()
     cursor.execute('SELECT user_id, name, phone, batch, payment_status, balance, is_banned, payment_date FROM users WHERE user_id = ?', (user_id,))
     row = cursor.fetchone()
@@ -118,14 +122,14 @@ def get_user(user_id: int):
 def add_user_if_not_exists(user_id: int):
     user = get_user(user_id)
     if not user:
-        conn = sqlite3.connect(DB_NAME)
+        conn = sqlite3.connect(DB_NAME, timeout=30.0)
         cursor = conn.cursor()
         cursor.execute('INSERT INTO users (user_id) VALUES (?)', (user_id,))
         conn.commit()
         conn.close()
 
 def update_user(user_id: int, **kwargs):
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=30.0)
     cursor = conn.cursor()
     for key, value in kwargs.items():
         cursor.execute(f'UPDATE users SET {key} = ? WHERE user_id = ?', (value, user_id))
@@ -133,7 +137,7 @@ def update_user(user_id: int, **kwargs):
     conn.close()
 
 def get_paid_users_only():
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=30.0)
     cursor = conn.cursor()
     cursor.execute('''
         SELECT user_id, name, phone, batch, payment_date, payment_status 
@@ -157,7 +161,7 @@ def get_paid_users_only():
 
 def get_users_by_batch(batch_name: str):
     """ የተወሰነ ባች ውስጥ ያሉ ተጠቃሚዎችን ብቻ ለይቶ ያወጣል """
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=30.0)
     cursor = conn.cursor()
     cursor.execute('''
         SELECT user_id, name, phone, payment_status, payment_date, is_banned
@@ -180,7 +184,7 @@ def get_users_by_batch(batch_name: str):
     return users
 
 def record_payment_history(user_id: int, photo_id: str, status: str):
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=30.0)
     cursor = conn.cursor()
     today_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     cursor.execute('''
@@ -191,7 +195,7 @@ def record_payment_history(user_id: int, photo_id: str, status: str):
     conn.close()
 
 def get_all_users():
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=30.0)
     cursor = conn.cursor()
     cursor.execute('SELECT user_id, name, phone, batch, payment_status, balance, is_banned, payment_date FROM users')
     rows = cursor.fetchall()
@@ -212,7 +216,7 @@ def get_all_users():
 
 # ------------------ 3. የወርሃዊ ክፍያ ማስታወሻ ------------------
 async def check_expired_payments_logic(bot):
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=30.0)
     cursor = conn.cursor()
     cursor.execute('SELECT user_id, name, payment_date FROM users WHERE payment_status = ?', ('ፅድቋል (Approved)',))
     approved_users = cursor.fetchall()
@@ -1008,6 +1012,7 @@ if __name__ == '__main__':
         allow_reentry=True
     )
 
+    app.add_handler(CommandHandler("start", state=ConversationHandler.END)) # type: ignore
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ban", ban_user))
     app.add_handler(CommandHandler("unban", unban_user))
