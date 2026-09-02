@@ -32,7 +32,6 @@ def run_health_server():
 # ------------------ 1. መቼቶች (Configuration) ------------------
 TOKEN = "8594676233:AAF_Jl38ATSLUouYpN0ZLKAy9W77kbBi5nw"
 
-# 🟢 ሁለቱ አድሚኖች
 ADMIN_IDS = [7857140781, 7619940687]
 
 VIP_LINK = "https://t.me/+YourVIPPrivateChannelLinkHere"
@@ -42,25 +41,21 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# 🟢 Render Persistent Storage - ዳታ እንዳይጠፋ ማስተካከያ
 DATA_DIR = "/var/data" if os.path.exists("/var/data") else "."
 DB_NAME = os.path.join(DATA_DIR, "bot_database.db")
 BASE_BATCH_DIR = os.path.join(DATA_DIR, "batch_folders")
 
 def is_admin(user_id: int) -> bool:
-    """ ተጠቃሚው አድሚን መሆኑን ያረጋግጣል """
     return user_id in ADMIN_IDS
 
 # ------------------ 2. ፎልደር እና SQLite Database ዝግጅት ------------------
 def init_batch_folders():
-    """ ከባች 15 እስከ ባች 50 ያሉ ፎልደሮችን በራሱ ይፈጥራል """
     os.makedirs(BASE_BATCH_DIR, exist_ok=True)
     for b in range(15, 51):
         folder_path = os.path.join(BASE_BATCH_DIR, f"Batch_{b}")
         os.makedirs(folder_path, exist_ok=True)
 
 def init_db():
-    """ ዳታቤዝ ይፈጥራል፤ አሮጌ መረጃዎችን ሳይሰርዝ ይይዛል """
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
@@ -156,7 +151,6 @@ def get_paid_users_only():
     return paid_users
 
 def get_users_by_batch(batch_name: str):
-    """ የተወሰነ ባች ውስጥ ያሉ ተጠቃሚዎችን ብቻ ለይቶ ያወጣል """
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
@@ -252,7 +246,7 @@ async def background_payment_checker(app):
 # ------------------ 4. Keyboards & States ------------------
 REG_NAME, REG_PHONE, REG_BATCH = range(3)
 PAY_RECEIPT = 3
-BROADCAST_STATE = 4
+BROADCAST_TARGET, BROADCAST_CONTENT = range(4, 6)
 
 def main_menu(user_id: int) -> InlineKeyboardMarkup:
     user = get_user(user_id)
@@ -275,7 +269,6 @@ def main_menu(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 def get_batches_keyboard() -> InlineKeyboardMarkup:
-    """ ከባች 15 እስከ 50 በ 3 ረድፍ የተደረደሩ ቁልፎች """
     keyboard = []
     row = []
     for b in range(15, 51):
@@ -396,7 +389,6 @@ async def receive_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     update_user(user_id, payment_status='በማረጋገጥ ላይ (Pending)')
     user = get_user(user_id)
     
-    # ------------------ ደረሰኙን በየባቹ ፎልደር ውስጥ ሴቭ ማድረግ ------------------
     user_batch = user.get('batch', '')
     if user_batch and "ባች" in user_batch:
         batch_num = ''.join(filter(str.isdigit, user_batch))
@@ -511,14 +503,13 @@ async def show_admin_panel(query, context):
     admin_buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ ከፍለው ደረሰኝ የላኩ ብቻ (Paid)", callback_data='show_paid_only')],
         [InlineKeyboardButton("📁 በባች ከፍለሽ እዪ (View by Batch)", callback_data='show_batch_menu')],
-        [InlineKeyboardButton("📢 መልእክት በት (Broadcast)", callback_data='start_broadcast')],
+        [InlineKeyboardButton("📢 መልእክት/PDF በት (Broadcast)", callback_data='start_broadcast')],
         [InlineKeyboardButton("🔄 ክፍያዎችን በግድ ፈትሽ", callback_data='force_check_payments')],
         [InlineKeyboardButton("⬅️ ወደ ዋና ማውጫ", callback_data='main')]
     ])
     await query.edit_message_text(report, reply_markup=admin_buttons, parse_mode=ParseMode.HTML)
 
 async def show_batch_selector_admin(query, context):
-    """ አድሚኑ ከባች 15 - 50 መርጦ የውስጡን ሰዎች እንዲያይ ያደርጋል """
     keyboard = []
     row = []
     for b in range(15, 51):
@@ -539,7 +530,6 @@ async def show_batch_selector_admin(query, context):
     )
 
 async def display_specific_batch_users(query, context, batch_name):
-    """ የተመረጠው ባች ውስጥ ያሉትን አባላት ዝርዝር ያሳያል """
     users = get_users_by_batch(batch_name)
     
     if not users:
@@ -581,38 +571,128 @@ async def show_paid_users_list(query, context):
     buttons = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ ወደ አድሚን ገጽ", callback_data='admin_panel')]])
     await query.edit_message_text(text, reply_markup=buttons, parse_mode=ParseMode.HTML)
 
+# ------------------ 🆕 የባች ብሮድካስት እና PDF መላኪያ ------------------
+
 async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ ብሮድካስቱ ለማን መላክ እንዳለበት አማራጭ ያቀርባል """
     query = update.callback_query
+    
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🌐 ለሁሉም ተጠቃሚዎች (To All)", callback_data='bcast_target_ALL')],
+        [InlineKeyboardButton("📂 ለተወሰነ ባች ብቻ (Specific Batch)", callback_data='bcast_target_select_batch')],
+        [InlineKeyboardButton("⬅️ ወደ አድሚን ገጽ", callback_data='admin_panel')]
+    ])
+    
     await query.edit_message_text(
-        "📢 <b>የብሮድካስት መልእክት</b>\n\nለሁሉም ተጠቃሚዎች እንዲላክ የሚፈልጉትን መልእክት ይጻፉልኝ፡\n\n(ለማቋረጥ /cancel ይበሉ)",
+        "📢 <b>የማስታወቂያ/መረጃ መላኪያ</b>\n\n"
+        "መልእክቱን፣ ፎቶውን ወይም PDF ሰነዱን ለትኛው ክፍል መላክ ይፈልጋሉ?",
+        reply_markup=buttons,
         parse_mode=ParseMode.HTML
     )
-    return BROADCAST_STATE
+    return BROADCAST_TARGET
+
+async def select_broadcast_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ የተመረጠውን ባች ወይም ለሁሉም የሚለውን ይመዘግባል """
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == 'bcast_target_select_batch':
+        keyboard = []
+        row = []
+        for b in range(15, 51):
+            b_name = f"{b}ኛ ባች"
+            row.append(InlineKeyboardButton(f"{b}ኛ", callback_data=f"bcast_target_{b_name}"))
+            if len(row) == 3:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+        keyboard.append([InlineKeyboardButton("⬅️ ወደ አድሚን ገጽ", callback_data='admin_panel')])
+
+        await query.edit_message_text(
+            "📁 <b>መልእክቱ/PDF ሰነዱ ለየትኛው ባች ይላክ?</b>\n\nእባክዎን ባቹን ይምረጡ፡",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.HTML
+        )
+        return BROADCAST_TARGET
+
+    target_batch = data.replace('bcast_target_', '')
+    context.user_data['broadcast_target'] = target_batch
+
+    target_display = "ለሁሉም ተጠቃሚዎች" if target_batch == "ALL" else f"ለ{target_batch} አባላት"
+
+    await query.edit_message_text(
+        f"📢 <b>የማስታወቂያ መላኪያ ({target_display})</b>\n\n"
+        f"እባክዎን {target_display} እንዲላክ የሚፈልጉትን <b>ጽሑፍ (Text)፣ ፎቶ (Photo) ወይም PDF ሰነድ (Document)</b> አሁን ይላኩልኝ፡\n\n"
+        f"(ለማቋረጥ /cancel ይበሉ)",
+        parse_mode=ParseMode.HTML
+    )
+    return BROADCAST_CONTENT
 
 async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ ጽሑፉን፣ PDFን ወይም ፎቶውን ለተመረጡት ተጠቃሚዎች ይልካል """
     if not is_admin(update.effective_user.id):
         return ConversationHandler.END
-        
-    broadcast_msg = update.message.text
-    users = get_all_users()
+
+    target_batch = context.user_data.get('broadcast_target', 'ALL')
+
+    if target_batch == 'ALL':
+        users = get_all_users()
+        target_display = "ለሁሉም ተጠቃሚዎች"
+    else:
+        users = get_users_by_batch(target_batch)
+        target_display = f"ለ{target_batch}"
+
+    if not users:
+        await update.message.reply_text(
+            f"❌ <b>በ {target_display} ውስጥ ምንም የተመዘገበ ተጠቃሚ አልተገኘም!</b>",
+            reply_markup=main_menu(update.effective_user.id),
+            parse_mode=ParseMode.HTML
+        )
+        return ConversationHandler.END
+
+    msg = update.message
     success, failed = 0, 0
-    
-    await update.message.reply_text("⏳ መልእክቱ እየተላከ ነው...")
-    
+    await update.message.reply_text(f"⏳ መልእክቱ/ሰነዱ {target_display} እየተላከ ነው...")
+
     for u in users:
-        if u['is_banned'] == 0:
+        if u.get('is_banned', 0) == 0:
             try:
-                await context.bot.send_message(
-                    chat_id=u['user_id'],
-                    text=f"📢 <b>ማስታወቂያ ከፖርታሉ:</b>\n\n{broadcast_msg}",
-                    parse_mode=ParseMode.HTML
-                )
+                if msg.document:
+                    # PDF ወይም ሌላ ፋይል ሲሆን
+                    caption = f"📢 <b>ማስታወቂያ ከፖርታሉ ({target_display}):</b>\n\n{msg.caption}" if msg.caption else f"📢 <b>ማስታወቂያ ከፖርታሉ ({target_display})</b>"
+                    await context.bot.send_document(
+                        chat_id=u['user_id'],
+                        document=msg.document.file_id,
+                        caption=caption,
+                        parse_mode=ParseMode.HTML
+                    )
+                elif msg.photo:
+                    # ፎቶ ሲሆን
+                    caption = f"📢 <b>ማስታወቂያ ከፖርታሉ ({target_display}):</b>\n\n{msg.caption}" if msg.caption else f"📢 <b>ማስታወቂያ ከፖርታሉ ({target_display})</b>"
+                    await context.bot.send_photo(
+                        chat_id=u['user_id'],
+                        photo=msg.photo[-1].file_id,
+                        caption=caption,
+                        parse_mode=ParseMode.HTML
+                    )
+                elif msg.text:
+                    # ጽሑፍ ብቻ ሲሆን
+                    await context.bot.send_message(
+                        chat_id=u['user_id'],
+                        text=f"📢 <b>ማስታወቂያ ከፖርታሉ ({target_display}):</b>\n\n{msg.text}",
+                        parse_mode=ParseMode.HTML
+                    )
                 success += 1
-            except Exception:
+            except Exception as e:
+                logging.error(f"Failed to send broadcast to {u['user_id']}: {e}")
                 failed += 1
-                
+
     await update.message.reply_text(
-        f"✅ <b>ብሮድካስት ተጠናቋል!</b>\n\n• በተሳካ ሁኔታ የደረሳቸው: {success}\n• ያልደረሳቸው: {failed}",
+        f"✅ <b>ብሮድካስት ተጠናቋል! ({target_display})</b>\n\n"
+        f"• በተሳካ ሁኔታ የደረሳቸው: {success}\n"
+        f"• ያልደረሳቸው: {failed}",
         reply_markup=main_menu(update.effective_user.id),
         parse_mode=ParseMode.HTML
     )
@@ -848,7 +928,15 @@ if __name__ == '__main__':
     broadcast_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_broadcast, pattern='^start_broadcast$')],
         states={
-            BROADCAST_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_broadcast)],
+            BROADCAST_TARGET: [
+                CallbackQueryHandler(select_broadcast_target, pattern='^bcast_target_')
+            ],
+            BROADCAST_CONTENT: [
+                MessageHandler(
+                    (filters.TEXT | filters.Document.ALL | filters.PHOTO) & ~filters.COMMAND,
+                    send_broadcast
+                )
+            ],
         },
         fallbacks=[
             CommandHandler('cancel', cancel),
