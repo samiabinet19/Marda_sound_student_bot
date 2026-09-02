@@ -519,7 +519,6 @@ async def show_admin_panel(query, context):
     await query.edit_message_text(report, reply_markup=admin_buttons, parse_mode=ParseMode.HTML)
 
 async def show_batch_selector_admin(query, context):
-    """ አድሚኑ ከባች 15 - 50 መርጦ ማስታወቂያ የሚልክበትን ወይም ሰዎችን የሚያይበትን ቁልፎች ያዘጋጃል """
     keyboard = []
     row = []
     for b in range(15, 51):
@@ -540,7 +539,6 @@ async def show_batch_selector_admin(query, context):
     )
 
 async def show_batch_options_menu(query, context, batch_name):
-    """ የተመረጠው ባች ላይ አድሚኑ ማድረግ የሚችላቸውን አማራጮች ያሳያል """
     users = get_users_by_batch(batch_name)
     text = f"📂 <b>የ {batch_name} መቆጣጠሪያ</b>\n\nበዚህ ባች ውስጥ የተመዘገቡ ተጠቃሚዎች ብዛት፦ <b>{len(users)}</b>\n\nእባክዎን ማድረግ የሚፈልጉትን ይምረጡ፦"
     
@@ -553,7 +551,6 @@ async def show_batch_options_menu(query, context, batch_name):
     await query.edit_message_text(text, reply_markup=buttons, parse_mode=ParseMode.HTML)
 
 async def display_specific_batch_users(query, context, batch_name):
-    """ የተመረጠው ባች ውስጥ ያሉትን አባላት ዝርዝር ያሳያል """
     users = get_users_by_batch(batch_name)
     
     if not users:
@@ -574,8 +571,6 @@ async def display_specific_batch_users(query, context, batch_name):
         [InlineKeyboardButton("⬅️ ወደ አድሚን ገጽ", callback_data='admin_panel')]
     ])
     await query.edit_message_text(text, reply_markup=buttons, parse_mode=ParseMode.HTML)
-
-# --- 🟢 በየባቹ ማስታወቂያ መላኪያ Handlers (Text & PDF) ---
 
 async def prompt_batch_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -929,7 +924,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         await update.message.reply_text("❌ ሂደቱ ተቋርጧል።", reply_markup=main_menu(user_id))
     elif update.callback_query:
-        await update.callback_query.edit_message_text("❌ ሂደቱ ተቋርጧል።", reply_markup=main_menu(user_id))
+        try:
+            await update.callback_query.edit_message_text("❌ ሂደቱ ተቋርጧል።", reply_markup=main_menu(user_id))
+        except Exception:
+            await context.bot.send_message(chat_id=user_id, text="❌ ሂደቱ ተቋርጧል።", reply_markup=main_menu(user_id))
     return ConversationHandler.END
 
 # ------------------ 9. ዋና ማስኪያጃ (Main Execution) ------------------
@@ -949,10 +947,16 @@ if __name__ == '__main__':
         states={
             REG_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             REG_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)],
-            REG_BATCH: [CallbackQueryHandler(get_batch, pattern='^reg_batch_')],
+            REG_BATCH: [
+                CallbackQueryHandler(get_batch, pattern='^reg_batch_'),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, lambda update, context: update.message.reply_text(
+                    "⚠️ እባክዎን ከላይ ካሉት የባች ቁልፎች ውስጥ አንዱን ይምረጡ!", parse_mode=ParseMode.HTML
+                ))
+            ],
         },
         fallbacks=[
             CommandHandler('cancel', cancel),
+            CommandHandler('start', cancel),
             CallbackQueryHandler(cancel, pattern='^main$')
         ],
         allow_reentry=True
@@ -968,6 +972,7 @@ if __name__ == '__main__':
         },
         fallbacks=[
             CommandHandler('cancel', cancel),
+            CommandHandler('start', cancel),
             CallbackQueryHandler(cancel, pattern='^main$')
         ],
         allow_reentry=True
@@ -980,12 +985,12 @@ if __name__ == '__main__':
         },
         fallbacks=[
             CommandHandler('cancel', cancel),
+            CommandHandler('start', cancel),
             CallbackQueryHandler(cancel, pattern='^main$')
         ],
         allow_reentry=True
     )
 
-    # 🟢 አዲስ የተጨመረ፦ በየባቹ ማስታወቂያ (Text እና PDF) መላኪያ Handler
     batch_announcement_handler = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(prompt_batch_msg, pattern='^btn_send_txt_'),
@@ -997,6 +1002,7 @@ if __name__ == '__main__':
         },
         fallbacks=[
             CommandHandler('cancel', cancel),
+            CommandHandler('start', cancel),
             CallbackQueryHandler(cancel, pattern='^main$')
         ],
         allow_reentry=True
