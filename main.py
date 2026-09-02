@@ -64,7 +64,6 @@ def init_db():
     conn = sqlite3.connect(DB_NAME, timeout=30.0)
     cursor = conn.cursor()
     
-    # 🟢 SQLite Concurrency ማሻሻያ (ላግ እና ሎክ እንዳያደርግ)
     cursor.execute('PRAGMA journal_mode=WAL;')
     cursor.execute('PRAGMA synchronous=NORMAL;')
     
@@ -160,7 +159,6 @@ def get_paid_users_only():
     return paid_users
 
 def get_users_by_batch(batch_name: str):
-    """ የተወሰነ ባች ውስጥ ያሉ ተጠቃሚዎችን ብቻ ለይቶ ያወጣል """
     conn = sqlite3.connect(DB_NAME, timeout=30.0)
     cursor = conn.cursor()
     cursor.execute('''
@@ -281,7 +279,6 @@ def main_menu(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 def get_batches_keyboard() -> InlineKeyboardMarkup:
-    """ ከባች 15 እስከ 50 በ 3 ረድፍ የተደረደሩ ቁልፎች """
     keyboard = []
     row = []
     for b in range(15, 51):
@@ -1012,7 +1009,6 @@ if __name__ == '__main__':
         allow_reentry=True
     )
 
-    app.add_handler(CommandHandler("start", state=ConversationHandler.END)) # type: ignore
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ban", ban_user))
     app.add_handler(CommandHandler("unban", unban_user))
