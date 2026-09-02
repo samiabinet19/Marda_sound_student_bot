@@ -1062,4 +1062,5 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(handle_buttons))
 
     print("🚀 ቦቱ Render ላይ በተሳካ ሁኔታ ስራ ጀምሯል...")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
+
