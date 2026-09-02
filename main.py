@@ -30,7 +30,7 @@ def run_health_server():
     server.serve_forever()
 
 # ------------------ 1. መቼቶች (Configuration) ------------------
-TOKEN = "8594676233:AAG8a-pu7O99QqDiwCzm65bYD7S8Urh8"
+TOKEN = "8594676233:AAG8a-pu7O99Kp6QqDiwCzm65bYD7S8Urh8"
 
 # 🟢 ሁለቱ አድሚኖች
 ADMIN_IDS = [7857140781, 7619940687]
@@ -96,8 +96,7 @@ def init_db():
     conn.commit()
     conn.close()
 
-# Synchronous DB Logic
-def _get_user(user_id: int):
+def get_user(user_id: int):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('SELECT user_id, name, phone, batch, payment_status, balance, is_banned, payment_date FROM users WHERE user_id = ?', (user_id,))
@@ -116,8 +115,8 @@ def _get_user(user_id: int):
         }
     return None
 
-def _add_user_if_not_exists(user_id: int):
-    user = _get_user(user_id)
+def add_user_if_not_exists(user_id: int):
+    user = get_user(user_id)
     if not user:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
@@ -125,7 +124,7 @@ def _add_user_if_not_exists(user_id: int):
         conn.commit()
         conn.close()
 
-def _update_user(user_id: int, **kwargs):
+def update_user(user_id: int, **kwargs):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     for key, value in kwargs.items():
@@ -133,7 +132,7 @@ def _update_user(user_id: int, **kwargs):
     conn.commit()
     conn.close()
 
-def _get_paid_users_only():
+def get_paid_users_only():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
@@ -156,7 +155,8 @@ def _get_paid_users_only():
         })
     return paid_users
 
-def _get_users_by_batch(batch_name: str):
+def get_users_by_batch(batch_name: str):
+    """ የተወሰነ ባች ውስጥ ያሉ ተጠቃሚዎችን ብቻ ለይቶ ያወጣል """
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
@@ -179,7 +179,7 @@ def _get_users_by_batch(batch_name: str):
         })
     return users
 
-def _record_payment_history(user_id: int, photo_id: str, status: str):
+def record_payment_history(user_id: int, photo_id: str, status: str):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     today_str = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -190,7 +190,7 @@ def _record_payment_history(user_id: int, photo_id: str, status: str):
     conn.commit()
     conn.close()
 
-def _get_all_users():
+def get_all_users():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('SELECT user_id, name, phone, batch, payment_status, balance, is_banned, payment_date FROM users')
@@ -210,33 +210,13 @@ def _get_all_users():
         })
     return users
 
-# 🟢 Async DB Wrappers (ላግ እንዳይፈጥር Event Loopን ነፃ የሚያወጡ)
-async def get_user(user_id: int):
-    return await asyncio.to_thread(_get_user, user_id)
-
-async def add_user_if_not_exists(user_id: int):
-    await asyncio.to_thread(_add_user_if_not_exists, user_id)
-
-async def update_user(user_id: int, **kwargs):
-    await asyncio.to_thread(_update_user, user_id, **kwargs)
-
-async def get_paid_users_only():
-    return await asyncio.to_thread(_get_paid_users_only)
-
-async def get_users_by_batch(batch_name: str):
-    return await asyncio.to_thread(_get_users_by_batch, batch_name)
-
-async def record_payment_history(user_id: int, photo_id: str, status: str):
-    await asyncio.to_thread(_record_payment_history, user_id, photo_id, status)
-
-async def get_all_users():
-    return await asyncio.to_thread(_get_all_users)
-
 # ------------------ 3. የወርሃዊ ክፍያ ማስታወሻ ------------------
 async def check_expired_payments_logic(bot):
-    approved_users = await asyncio.to_thread(lambda: sqlite3.connect(DB_NAME).cursor().execute(
-        'SELECT user_id, name, payment_date FROM users WHERE payment_status = ?', ('ፅድቋል (Approved)',)
-    ).fetchall())
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id, name, payment_date FROM users WHERE payment_status = ?', ('ፅድቋል (Approved)',))
+    approved_users = cursor.fetchall()
+    conn.close()
 
     today = datetime.now()
     for uid, name, p_date_str in approved_users:
@@ -252,15 +232,13 @@ async def check_expired_payments_logic(bot):
                         text=f"⚠️ <b>የክፍያ ማስታወሻ!</b>\n\nሰላም <b>{name}</b>፣ ክፍያዎ ለማለቅ <b>2 ቀን ብቻ</b> ቀርቶታል። አገልግሎቱ እንዳይቋረጥብዎ ያድሱ።",
                         parse_mode=ParseMode.HTML
                     )
-                    await asyncio.sleep(0.04)
                 elif days_passed >= 30:
-                    await update_user(uid, payment_status='ጊዜው ያለፈበት (Expired)')
+                    update_user(uid, payment_status='ጊዜው ያለፈበት (Expired)')
                     await bot.send_message(
                         chat_id=uid,
                         text=f"🔔 <b>የክፍያ ጊዜዎ አብቅቷል!</b>\n\nሰላም <b>{name}</b>፣ 30 ቀናት ስለሞሉ የወሩ ክፍያ ጊዜዎ አብቅቷል። በ <b>'💳 ክፍያ ፈፅም'</b> በኩል ድጋሚ ይክፈሉ።",
                         parse_mode=ParseMode.HTML
                     )
-                    await asyncio.sleep(0.04)
             except Exception as e:
                 logging.error(f"Error checking user {uid}: {e}")
 
@@ -278,8 +256,8 @@ PAY_RECEIPT = 3
 BROADCAST_STATE = 4
 BATCH_MSG_STATE, BATCH_PDF_STATE = range(5, 7)
 
-async def main_menu(user_id: int) -> InlineKeyboardMarkup:
-    user = await get_user(user_id)
+def main_menu(user_id: int) -> InlineKeyboardMarkup:
+    user = get_user(user_id)
     keyboard = [
         [InlineKeyboardButton("🏫 ስለ ትምህርት ቤቱ (School Info)", callback_data='school_info')],
         [InlineKeyboardButton("📝 አዲስ ምዝገባ (Register)", callback_data='register')],
@@ -299,6 +277,7 @@ async def main_menu(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 def get_batches_keyboard() -> InlineKeyboardMarkup:
+    """ ከባች 15 እስከ 50 በ 3 ረድፍ የተደረደሩ ቁልፎች """
     keyboard = []
     row = []
     for b in range(15, 51):
@@ -316,7 +295,7 @@ def back_menu() -> InlineKeyboardMarkup:
 
 async def is_banned(update: Update) -> bool:
     user_id = update.effective_user.id
-    user = await get_user(user_id)
+    user = get_user(user_id)
     if user and user['is_banned'] == 1:
         if update.message:
             await update.message.reply_text("❌ <b>እርስዎ ከዚህ ቦት ታግደዋል!</b>", parse_mode=ParseMode.HTML)
@@ -334,15 +313,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await is_banned(update):
         return
     user_id = update.effective_user.id
-    await add_user_if_not_exists(user_id)
+    add_user_if_not_exists(user_id)
     
     text = "እንኳን ወደ ፖርታሉ በሰላም መጡ! 👋\nእባክዎን የሚፈልጉትን አገልግሎት ይምረጡ፡"
-    reply_kb = await main_menu(user_id)
     
     if update.message:
-        await update.message.reply_text(text, reply_markup=reply_kb)
+        await update.message.reply_text(text, reply_markup=main_menu(user_id))
     elif update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_kb)
+        await update.callback_query.edit_message_text(text, reply_markup=main_menu(user_id))
 
 async def start_registration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await is_banned(update):
@@ -355,8 +333,8 @@ async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await is_banned(update):
         return ConversationHandler.END
     user_id = update.effective_user.id
-    await add_user_if_not_exists(user_id)
-    await update_user(user_id, name=update.message.text)
+    add_user_if_not_exists(user_id)
+    update_user(user_id, name=update.message.text)
     await update.message.reply_text("በጣም ጥሩ! አሁን <b>የስልክ ቁጥርዎን</b> ያስገቡ፡", parse_mode=ParseMode.HTML)
     return REG_PHONE
 
@@ -364,7 +342,7 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await is_banned(update):
         return ConversationHandler.END
     user_id = update.effective_user.id
-    await update_user(user_id, phone=update.message.text)
+    update_user(user_id, phone=update.message.text)
     
     await update.message.reply_text(
         "አሁን ደግሞ <b>የተመደቡበትን ባች (ከባች 15 - ባች 50)</b> ይምረጡ፡",
@@ -380,9 +358,8 @@ async def get_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     selected_batch = query.data.replace('reg_batch_', '')
     
-    await update_user(user_id, batch=selected_batch)
-    user = await get_user(user_id)
-    reply_kb = await main_menu(user_id)
+    update_user(user_id, batch=selected_batch)
+    user = get_user(user_id)
     
     await query.edit_message_text(
         f"✅ <b>ምዝገባዎ ተጠናቋል!</b>\n\n"
@@ -390,7 +367,7 @@ async def get_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📞 <b>ስልክ:</b> {user['phone']}\n"
         f"🎓 <b>ባች:</b> {user['batch']}\n\n"
         f"አሁን <b>'💳 ክፍያ ፈፅም'</b> የሚለውን በመጫን ደረሰኝ ማስገባት ይችላሉ።",
-        reply_markup=reply_kb,
+        reply_markup=main_menu(user_id),
         parse_mode=ParseMode.HTML
     )
     return ConversationHandler.END
@@ -417,9 +394,9 @@ async def receive_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1]
     photo_file_id = photo.file_id
     
-    await add_user_if_not_exists(user_id)
-    await update_user(user_id, payment_status='በማረጋገጥ ላይ (Pending)')
-    user = await get_user(user_id)
+    add_user_if_not_exists(user_id)
+    update_user(user_id, payment_status='በማረጋገጥ ላይ (Pending)')
+    user = get_user(user_id)
     
     user_batch = user.get('batch', '')
     if user_batch and "ባች" in user_batch:
@@ -437,12 +414,11 @@ async def receive_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logging.error(f"Failed to save image in batch folder: {e}")
 
-    await record_payment_history(user_id, photo_file_id, "በማረጋገጥ ላይ")
-    reply_kb = await main_menu(user_id)
+    record_payment_history(user_id, photo_file_id, "በማረጋገጥ ላይ")
     
     await update.message.reply_text(
         "✅ <b>ደረሰኝዎ ደርሶናል!</b>\nአድሚኑ አረጋግጦ እስኪያፀድቀው ድረስ እባክዎን ትንሽ ይታገሱ።",
-        reply_markup=reply_kb,
+        reply_markup=main_menu(user_id),
         parse_mode=ParseMode.HTML
     )
     
@@ -469,7 +445,6 @@ async def receive_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=admin_markup,
                 parse_mode=ParseMode.HTML
             )
-            await asyncio.sleep(0.04)
         except Exception as e:
             logging.error(f"Failed to send to admin {admin_id}: {e}")
             
@@ -494,7 +469,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     if action == "approve":
         today_str = datetime.now().strftime("%Y-%m-%d")
-        await update_user(target_user_id, payment_status='ፅድቋል (Approved)', balance=100.0, payment_date=today_str)
+        update_user(target_user_id, payment_status='ፅድቋል (Approved)', balance=100.0, payment_date=today_str)
         
         await query.edit_message_caption(
             caption=f"{query.message.caption}\n\n✅ <b>ሁኔታ:</b> ክፍያው ፅድቋል!",
@@ -509,7 +484,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             parse_mode=ParseMode.HTML
         )
     elif action == "reject":
-        await update_user(target_user_id, payment_status='ተሰርዟል (Rejected)')
+        update_user(target_user_id, payment_status='ተሰርዟል (Rejected)')
         await query.edit_message_caption(
             caption=f"{query.message.caption}\n\n❌ <b>ሁኔታ:</b> ክፍያው ውድቅ ተደርጓል!",
             reply_markup=None,
@@ -524,8 +499,8 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ------------------ 6. የአድሚን ክፍሎች (Admin Dashboard & Batch Announcements) ------------------
 
 async def show_admin_panel(query, context):
-    all_users = await get_all_users()
-    paid_users = await get_paid_users_only()
+    all_users = get_all_users()
+    paid_users = get_paid_users_only()
     
     report = (
         f"⚙️ <b>የአድሚን መቆጣጠሪያ Dashboard</b>\n\n"
@@ -544,6 +519,7 @@ async def show_admin_panel(query, context):
     await query.edit_message_text(report, reply_markup=admin_buttons, parse_mode=ParseMode.HTML)
 
 async def show_batch_selector_admin(query, context):
+    """ አድሚኑ ከባች 15 - 50 መርጦ ማስታወቂያ የሚልክበትን ወይም ሰዎችን የሚያይበትን ቁልፎች ያዘጋጃል """
     keyboard = []
     row = []
     for b in range(15, 51):
@@ -564,7 +540,8 @@ async def show_batch_selector_admin(query, context):
     )
 
 async def show_batch_options_menu(query, context, batch_name):
-    users = await get_users_by_batch(batch_name)
+    """ የተመረጠው ባች ላይ አድሚኑ ማድረግ የሚችላቸውን አማራጮች ያሳያል """
+    users = get_users_by_batch(batch_name)
     text = f"📂 <b>የ {batch_name} መቆጣጠሪያ</b>\n\nበዚህ ባች ውስጥ የተመዘገቡ ተጠቃሚዎች ብዛት፦ <b>{len(users)}</b>\n\nእባክዎን ማድረግ የሚፈልጉትን ይምረጡ፦"
     
     buttons = InlineKeyboardMarkup([
@@ -576,7 +553,8 @@ async def show_batch_options_menu(query, context, batch_name):
     await query.edit_message_text(text, reply_markup=buttons, parse_mode=ParseMode.HTML)
 
 async def display_specific_batch_users(query, context, batch_name):
-    users = await get_users_by_batch(batch_name)
+    """ የተመረጠው ባች ውስጥ ያሉትን አባላት ዝርዝር ያሳያል """
+    users = get_users_by_batch(batch_name)
     
     if not users:
         text = f"📂 <b>{batch_name}</b> ውስጥ እስካሁን የተመዘገበ ተጠቃሚ የለም።"
@@ -618,7 +596,7 @@ async def send_batch_text_message(update: Update, context: ContextTypes.DEFAULT_
         
     batch_name = context.user_data.get('target_batch')
     msg_text = update.message.text
-    users = await get_users_by_batch(batch_name)
+    users = get_users_by_batch(batch_name)
     
     if not users:
         await update.message.reply_text(f"❌ በ{batch_name} ውስጥ የተመዘገበ ምንም ተጠቃሚ አልተገኘም።")
@@ -636,14 +614,12 @@ async def send_batch_text_message(update: Update, context: ContextTypes.DEFAULT_
                     parse_mode=ParseMode.HTML
                 )
                 success += 1
-                await asyncio.sleep(0.04) # 🟢 Telegram Rate limit መከላከያ
             except Exception:
                 failed += 1
 
-    reply_kb = await main_menu(update.effective_user.id)
     await update.message.reply_text(
         f"✅ <b>የ{batch_name} ማስታወቂያ ተላከ!</b>\n\n• በተሳካ ሁኔታ የደረሳቸው: {success}\n• ያልደረሳቸው: {failed}",
-        reply_markup=reply_kb,
+        reply_markup=main_menu(update.effective_user.id),
         parse_mode=ParseMode.HTML
     )
     return ConversationHandler.END
@@ -684,7 +660,7 @@ async def send_batch_pdf_document(update: Update, context: ContextTypes.DEFAULT_
     except Exception as e:
         logging.error(f"Failed to save PDF in batch folder: {e}")
 
-    users = await get_users_by_batch(batch_name)
+    users = get_users_by_batch(batch_name)
     success, failed = 0, 0
     
     for u in users:
@@ -697,16 +673,14 @@ async def send_batch_pdf_document(update: Update, context: ContextTypes.DEFAULT_
                     parse_mode=ParseMode.HTML
                 )
                 success += 1
-                await asyncio.sleep(0.04) # 🟢 Rate limit መከላከያ
             except Exception:
                 failed += 1
 
-    reply_kb = await main_menu(update.effective_user.id)
     await update.message.reply_text(
         f"✅ <b>የ{batch_name} PDF ማስታወቂያ በተሳካ ሁኔታ ተላከ!</b>\n\n"
         f"📂 <b>የተቀመጠበት ፎልደር:</b> <code>{file_path}</code>\n"
         f"• በተሳካ ሁኔታ የደረሳቸው: {success}\n• ያልደረሳቸው: {failed}",
-        reply_markup=reply_kb,
+        reply_markup=main_menu(update.effective_user.id),
         parse_mode=ParseMode.HTML
     )
     return ConversationHandler.END
@@ -714,7 +688,7 @@ async def send_batch_pdf_document(update: Update, context: ContextTypes.DEFAULT_
 # ------------------ 7. General Admin Broadcast, Revoke & Ban Handlers ------------------
 
 async def show_paid_users_list(query, context):
-    paid_users = await get_paid_users_only()
+    paid_users = get_paid_users_only()
     
     if not paid_users:
         text = "❌ <b>እስካሁን ደረሰኝ ልከው ክፍያቸው የጸደቀላቸው ተጠቃሚዎች የሉም።</b>"
@@ -746,7 +720,7 @@ async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
         
     broadcast_msg = update.message.text
-    users = await get_all_users()
+    users = get_all_users()
     success, failed = 0, 0
     
     await update.message.reply_text("⏳ መልእክቱ እየተላከ ነው...")
@@ -760,18 +734,17 @@ async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode=ParseMode.HTML
                 )
                 success += 1
-                await asyncio.sleep(0.04) # 🟢 Rate limit መከላከያ
             except Exception:
                 failed += 1
                 
-    reply_kb = await main_menu(update.effective_user.id)
     await update.message.reply_text(
         f"✅ <b>ብሮድካስት ተጠናቋል!</b>\n\n• በተሳካ ሁኔታ የደረሳቸው: {success}\n• ያልደረሳቸው: {failed}",
-        reply_markup=reply_kb,
+        reply_markup=main_menu(update.effective_user.id),
         parse_mode=ParseMode.HTML
     )
     return ConversationHandler.END
 
+# 🟢 አዲስ የተጨመረ፦ ክፍያን ለመሰረዝ እና ከባች ለማስወጣት የሚያስችል የ /revoke ትእዛዝ
 async def revoke_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
@@ -785,13 +758,14 @@ async def revoke_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         target_id = int(context.args[0])
-        user = await get_user(target_id)
+        user = get_user(target_id)
         
         if not user:
             await update.message.reply_text("❌ ይህ ተጠቃሚ በዳታቤዝ ውስጥ አልተገኘም።")
             return
 
-        await update_user(target_id, payment_status='ተሰርዟል (Rejected)', balance=0.0, batch='ያልተመረጠ')
+        # ክፍያውን ሰርዞ፣ ባላንስ 0 አድርጎ ባቹን ወደ "ያልተመረጠ" ይመልሰዋል
+        update_user(target_id, payment_status='ተሰርዟል (Rejected)', balance=0.0, batch='ያልተመረጠ')
         
         user_name = user.get('name', 'ተጠቃሚ')
         await update.message.reply_text(
@@ -799,6 +773,7 @@ async def revoke_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.HTML
         )
         
+        # ለተጠቃሚው ማሳሰቢያ ይልካል
         try:
             await context.bot.send_message(
                 chat_id=target_id, 
@@ -824,12 +799,12 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         target_id = int(context.args[0])
-        user = await get_user(target_id)
+        user = get_user(target_id)
         if not user:
             await update.message.reply_text("❌ ይህ ተጠቃሚ በዳታቤዝ ውስጥ አልተገኘም።")
             return
 
-        await update_user(target_id, is_banned=1)
+        update_user(target_id, is_banned=1)
         await update.message.reply_text(
             f"🚫 ተጠቃሚ <b>{user['name']}</b> (ID: <code>{target_id}</code>) በተሳካ ሁኔታ ታግዷል!", 
             parse_mode=ParseMode.HTML
@@ -860,12 +835,12 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         target_id = int(context.args[0])
-        user = await get_user(target_id)
+        user = get_user(target_id)
         if not user:
             await update.message.reply_text("❌ ይህ ተጠቃሚ በዳታቤዝ ውስጥ አልተገኘም።")
             return
 
-        await update_user(target_id, is_banned=0)
+        update_user(target_id, is_banned=0)
         await update.message.reply_text(
             f"✅ ተጠቃሚ <b>{user['name']}</b> (ID: <code>{target_id}</code>) ከእገዳ ነፃ ወጥቷል!", 
             parse_mode=ParseMode.HTML
@@ -954,7 +929,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=sub_menu, parse_mode=ParseMode.HTML)
 
     elif query.data == 'profile':
-        user = await get_user(user_id)
+        user = get_user(user_id)
         p_date = user['payment_date'] if user['payment_date'] else "ያልተመዘገበ"
         profile_text = (
             f"📋 <b>የመገለጫ መረጃ</b>\n\n"
@@ -968,7 +943,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(profile_text, reply_markup=back_menu(), parse_mode=ParseMode.HTML)
         
     elif query.data == 'wallet':
-        user = await get_user(user_id)
+        user = get_user(user_id)
         wallet_text = (
             f"💰 <b>የእርስዎ የሂሳብ ባላንስ (Wallet)</b>\n\n"
             f"• <b>ያለዎት ባላንስ:</b> <code>{user['balance']} ETB</code>\n\n"
@@ -993,11 +968,10 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    reply_kb = await main_menu(user_id)
     if update.message:
-        await update.message.reply_text("❌ ሂደቱ ተቋርጧል።", reply_markup=reply_kb)
+        await update.message.reply_text("❌ ሂደቱ ተቋርጧል።", reply_markup=main_menu(user_id))
     elif update.callback_query:
-        await update.callback_query.edit_message_text("❌ ሂደቱ ተቋርጧል።", reply_markup=reply_kb)
+        await update.callback_query.edit_message_text("❌ ሂደቱ ተቋርጧል።", reply_markup=main_menu(user_id))
     return ConversationHandler.END
 
 # ------------------ 9. ዋና ማስኪያጃ (Main Execution) ------------------
@@ -1073,7 +1047,7 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ban", ban_user))
     app.add_handler(CommandHandler("unban", unban_user))
-    app.add_handler(CommandHandler("revoke", revoke_user))
+    app.add_handler(CommandHandler("revoke", revoke_user))  # 🟢 አዲስ የተጨመረ የ /revoke Handler
     
     app.add_handler(reg_handler)
     app.add_handler(pay_handler)
@@ -1083,5 +1057,5 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(handle_admin_action, pattern='^(approve|reject)_'))
     app.add_handler(CallbackQueryHandler(handle_buttons))
 
-    print("🚀 ቦቱ Render ላይ በፍጥነት እና ያለ ምንም ላግ መስራት ጀምሯል...")
+    print("🚀 ቦቱ Render ላይ በተሳካ ሁኔታ ስራ ጀምሯል...")
     app.run_polling()
