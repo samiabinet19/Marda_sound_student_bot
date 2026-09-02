@@ -685,7 +685,7 @@ async def send_batch_pdf_document(update: Update, context: ContextTypes.DEFAULT_
     )
     return ConversationHandler.END
 
-# ------------------ 7. General Admin Broadcast & Ban Handlers ------------------
+# ------------------ 7. General Admin Broadcast, Revoke & Ban Handlers ------------------
 
 async def show_paid_users_list(query, context):
     paid_users = get_paid_users_only()
@@ -743,6 +743,48 @@ async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML
     )
     return ConversationHandler.END
+
+# 🟢 አዲስ የተጨመረ፦ ክፍያን ለመሰረዝ እና ከባች ለማስወጣት የሚያስችል የ /revoke ትእዛዝ
+async def revoke_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "⚠️ <b>የተጠቃሚውን ID አብረው ይጻፉ!</b>\n\n<b>ምሳሌ፦</b> <code>/revoke 8711072926</code>", 
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    try:
+        target_id = int(context.args[0])
+        user = get_user(target_id)
+        
+        if not user:
+            await update.message.reply_text("❌ ይህ ተጠቃሚ በዳታቤዝ ውስጥ አልተገኘም።")
+            return
+
+        # ክፍያውን ሰርዞ፣ ባላንስ 0 አድርጎ ባቹን ወደ "ያልተመረጠ" ይመልሰዋል
+        update_user(target_id, payment_status='ተሰርዟል (Rejected)', balance=0.0, batch='ያልተመረጠ')
+        
+        user_name = user.get('name', 'ተጠቃሚ')
+        await update.message.reply_text(
+            f"🔄 ተጠቃሚ <b>{user_name}</b> (ID: <code>{target_id}</code>) ክፍያው ተሰርዞ ከባቹ ተወግዷል!", 
+            parse_mode=ParseMode.HTML
+        )
+        
+        # ለተጠቃሚው ማሳሰቢያ ይልካል
+        try:
+            await context.bot.send_message(
+                chat_id=target_id, 
+                text="⚠️ <b>ማሳሰቢያ፦</b> የክፍያ ማረጋገጫዎ ተሰርዟል! እባክዎን እንደገና ትክክለኛ ደረሰኝ ያስገቡ።", 
+                parse_mode=ParseMode.HTML
+            )
+        except Exception:
+            pass
+
+    except ValueError:
+        await update.message.reply_text("⚠️ እባክዎን ትክክለኛ የቁጥር ID ያስገቡ!")
 
 async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -985,7 +1027,6 @@ if __name__ == '__main__':
         allow_reentry=True
     )
 
-    # 🟢 አዲስ የተጨመረ፦ በየባቹ ማስታወቂያ (Text እና PDF) መላኪያ Handler
     batch_announcement_handler = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(prompt_batch_msg, pattern='^btn_send_txt_'),
@@ -1002,9 +1043,11 @@ if __name__ == '__main__':
         allow_reentry=True
     )
 
+    # የትእዛዝ (Command) ማያያዣዎች
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ban", ban_user))
     app.add_handler(CommandHandler("unban", unban_user))
+    app.add_handler(CommandHandler("revoke", revoke_user))  # 🟢 አዲስ የተጨመረ የ /revoke Handler
     
     app.add_handler(reg_handler)
     app.add_handler(pay_handler)
