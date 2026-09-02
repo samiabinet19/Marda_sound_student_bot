@@ -17,10 +17,6 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# ------------------ 0. Global Background Tasks Holder ------------------
-# Background Task በ Python Garbage Collector እንዳይሰረዝ የሚይዝ Set
-BACKGROUND_TASKS = set()
-
 # ------------------ Render Port Health Check Server ------------------
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -34,7 +30,7 @@ def run_health_server():
     server.serve_forever()
 
 # ------------------ 1. መቼቶች (Configuration) ------------------
-TOKEN = os.environ.get("BOT_TOKEN", "8594676233:AAGIvsi1NA2gwngRv7PDTT8lhjIW8VHGLXE")
+TOKEN = "8594676233:AAGIvsi1NA2gwngRv7PDTT8lhjIW8VHGLXE"
 
 # 🟢 ሁለቱ አድሚኖች
 ADMIN_IDS = [7857140781, 7619940687]
@@ -748,6 +744,7 @@ async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
+# 🟢 አዲስ የተጨመረ፦ ክፍያን ለመሰረዝ እና ከባች ለማስወጣት የሚያስችል የ /revoke ትእዛዝ
 async def revoke_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
@@ -767,6 +764,7 @@ async def revoke_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ ይህ ተጠቃሚ በዳታቤዝ ውስጥ አልተገኘም።")
             return
 
+        # ክፍያውን ሰርዞ፣ ባላንስ 0 አድርጎ ባቹን ወደ "ያልተመረጠ" ይመልሰዋል
         update_user(target_id, payment_status='ተሰርዟል (Rejected)', balance=0.0, batch='ያልተመረጠ')
         
         user_name = user.get('name', 'ተጠቃሚ')
@@ -775,6 +773,7 @@ async def revoke_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.HTML
         )
         
+        # ለተጠቃሚው ማሳሰቢያ ይልካል
         try:
             await context.bot.send_message(
                 chat_id=target_id, 
@@ -977,10 +976,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ------------------ 9. ዋና ማስኪያጃ (Main Execution) ------------------
 async def post_init(app):
-    # Task-ኡ እንዳይሰረዝ በ BACKGROUND_TASKS ውስጥ ማጣቀሻ ተይዞበታል
-    task = asyncio.create_task(background_payment_checker(app))
-    BACKGROUND_TASKS.add(task)
-    task.add_done_callback(BACKGROUND_TASKS.discard)
+    asyncio.create_task(background_payment_checker(app))
 
 if __name__ == '__main__':
     threading.Thread(target=run_health_server, daemon=True).start()
@@ -1051,7 +1047,7 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ban", ban_user))
     app.add_handler(CommandHandler("unban", unban_user))
-    app.add_handler(CommandHandler("revoke", revoke_user))
+    app.add_handler(CommandHandler("revoke", revoke_user))  # 🟢 አዲስ የተጨመረ የ /revoke Handler
     
     app.add_handler(reg_handler)
     app.add_handler(pay_handler)
