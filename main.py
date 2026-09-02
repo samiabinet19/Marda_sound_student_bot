@@ -32,7 +32,7 @@ def run_health_server():
 # ------------------ 1. መቼቶች (Configuration) ------------------
 TOKEN = "8594676233:AAG8a-pu7O99Kp6QqDiwCzm65bYD7S8Urh8"
 
-# 🟢 ሁለት አድሚኖች እዚህ ተካተውበታል
+# 🟢 ሁለቱ አድሚኖች
 ADMIN_IDS = [7857140781, 7619940687]
 
 VIP_LINK = "https://t.me/+YourVIPPrivateChannelLinkHere"
@@ -42,8 +42,10 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-DB_NAME = "bot_database.db"
-BASE_BATCH_DIR = "batch_folders"
+# 🟢 Render Persistent Storage - ዳታ እንዳይጠፋ ማስተካከያ
+DATA_DIR = "/var/data" if os.path.exists("/var/data") else "."
+DB_NAME = os.path.join(DATA_DIR, "bot_database.db")
+BASE_BATCH_DIR = os.path.join(DATA_DIR, "batch_folders")
 
 def is_admin(user_id: int) -> bool:
     """ ተጠቃሚው አድሚን መሆኑን ያረጋግጣል """
@@ -153,6 +155,29 @@ def get_paid_users_only():
         })
     return paid_users
 
+def get_users_by_batch(batch_name: str):
+    """ የተወሰነ ባች ውስጥ ያሉ ተጠቃሚዎችን ብቻ ለይቶ ያወጣል """
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT user_id, name, phone, payment_status, payment_date 
+        FROM users 
+        WHERE batch = ?
+    ''', (batch_name,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    users = []
+    for row in rows:
+        users.append({
+            'user_id': row[0],
+            'name': row[1],
+            'phone': row[2],
+            'payment_status': row[3],
+            'payment_date': row[4]
+        })
+    return users
+
 def record_payment_history(user_id: int, photo_id: str, status: str):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -244,7 +269,6 @@ def main_menu(user_id: int) -> InlineKeyboardMarkup:
         
     keyboard.append([InlineKeyboardButton("📞 ግንኙነት (Contact)", callback_data='contact')])
 
-    # 🟢 ከሁለቱ አድሚኖች አንዱ ከሆነ የአድሚን ገጽ ቁልፍ ይታያል
     if is_admin(user_id):
         keyboard.append([InlineKeyboardButton("⚙️ የአድሚን ገጽ (Admin)", callback_data='admin_panel')])
         
@@ -411,7 +435,6 @@ async def receive_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🆔 <b>User ID:</b> <code>{user_id}</code>"
     )
 
-    # 🟢 ደረሰኙ ለሁለቱም አድሚኖች ይላካል
     for admin_id in ADMIN_IDS:
         try:
             await context.bot.send_photo(
@@ -472,6 +495,8 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             parse_mode=ParseMode.HTML
         )
 
+# ------------------ የአድሚን ክፍሎች ------------------
+
 async def show_admin_panel(query, context):
     all_users = get_all_users()
     paid_users = get_paid_users_only()
@@ -485,11 +510,56 @@ async def show_admin_panel(query, context):
             
     admin_buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ ከፍለው ደረሰኝ የላኩ ብቻ (Paid)", callback_data='show_paid_only')],
+        [InlineKeyboardButton("📁 በባች ከፍለሽ እዪ (View by Batch)", callback_data='show_batch_menu')],
         [InlineKeyboardButton("📢 መልእክት በት (Broadcast)", callback_data='start_broadcast')],
         [InlineKeyboardButton("🔄 ክፍያዎችን በግድ ፈትሽ", callback_data='force_check_payments')],
         [InlineKeyboardButton("⬅️ ወደ ዋና ማውጫ", callback_data='main')]
     ])
     await query.edit_message_text(report, reply_markup=admin_buttons, parse_mode=ParseMode.HTML)
+
+async def show_batch_selector_admin(query, context):
+    """ አድሚኑ ከባች 15 - 50 መርጦ የውስጡን ሰዎች እንዲያይ ያደርጋል """
+    keyboard = []
+    row = []
+    for b in range(15, 51):
+        b_name = f"{b}ኛ ባች"
+        row.append(InlineKeyboardButton(f"{b}ኛ", callback_data=f"adm_batch_{b_name}"))
+        if len(row) == 3:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+        
+    keyboard.append([InlineKeyboardButton("⬅️ ወደ አድሚን ገጽ", callback_data='admin_panel')])
+    
+    await query.edit_message_text(
+        "📁 <b>የትኛውን ባች ማየት ትፈልጊያለሽ?</b>\n\nማየት የሚፈልጉትን ባች ይምረጡ፡",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode=ParseMode.HTML
+    )
+
+async def display_specific_batch_users(query, context, batch_name):
+    """ የተመረጠው ባች ውስጥ ያሉትን አባላት ዝርዝር ያሳያል """
+    users = get_users_by_batch(batch_name)
+    
+    if not users:
+        text = f"📂 <b>{batch_name}</b> ውስጥ እስካሁን የተመዘገበ ተጠቃሚ የለም።"
+    else:
+        text = f"📂 <b>የ{batch_name} አባላት ዝርዝር ({len(users)})፦</b>\n\n"
+        for idx, u in enumerate(users, 1):
+            text += (
+                f"{idx}. <b>ስም:</b> {u['name']}\n"
+                f"   <b>ስልክ:</b> {u['phone']}\n"
+                f"   <b>ክፍያ:</b> {u['payment_status']}\n"
+                f"   <b>ID:</b> <code>{u['user_id']}</code>\n"
+                f"   -------------------\n"
+            )
+            
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ ወደ ባች ዝርዝር ተመለስ", callback_data='show_batch_menu')],
+        [InlineKeyboardButton("⬅️ ወደ አድሚን ገጽ", callback_data='admin_panel')]
+    ])
+    await query.edit_message_text(text, reply_markup=buttons, parse_mode=ParseMode.HTML)
 
 async def show_paid_users_list(query, context):
     paid_users = get_paid_users_only()
@@ -548,7 +618,7 @@ async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
-# ------------------ Admin Ban / Unban Functions ------------------
+# ------------------ Admin Ban / Unban ------------------
 
 async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -631,6 +701,13 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     elif query.data == 'show_paid_only' and is_admin(user_id):
         await show_paid_users_list(query, context)
+
+    elif query.data == 'show_batch_menu' and is_admin(user_id):
+        await show_batch_selector_admin(query, context)
+
+    elif query.data.startswith('adm_batch_') and is_admin(user_id):
+        batch_name = query.data.replace('adm_batch_', '')
+        await display_specific_batch_users(query, context, batch_name)
 
     elif query.data == 'force_check_payments' and is_admin(user_id):
         await query.edit_message_text("⏳ ክፍያዎች እየተፈተሹ ነው...")
@@ -732,11 +809,10 @@ async def post_init(app):
     asyncio.create_task(background_payment_checker(app))
 
 if __name__ == '__main__':
-    # Render Port Health Check ሰርቨር ማስነሳት
     threading.Thread(target=run_health_server, daemon=True).start()
 
     init_db()
-    init_batch_folders()  # ከባች 15 እስከ 50 ያሉ ፎልደሮች በራሱ ይፈጠራሉ
+    init_batch_folders()
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
@@ -781,17 +857,14 @@ if __name__ == '__main__':
         allow_reentry=True
     )
 
-    # ------------------ Command Handlers ------------------
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ban", ban_user))
     app.add_handler(CommandHandler("unban", unban_user))
     
-    # ------------------ Conversation Handlers ------------------
     app.add_handler(reg_handler)
     app.add_handler(pay_handler)
     app.add_handler(broadcast_handler)
     
-    # ------------------ Callback Handlers ------------------
     app.add_handler(CallbackQueryHandler(handle_admin_action, pattern='^(approve|reject)_'))
     app.add_handler(CallbackQueryHandler(handle_buttons))
 
