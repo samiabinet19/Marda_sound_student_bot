@@ -62,7 +62,7 @@ def run_health_server():
     server.serve_forever()
 
 # ------------------ 1. መቼቶች (Configuration) ------------------
-TOKEN = "8594676233:AAF_Jl38ATSLUouYpN0ZLKAy9W77kbBi5nw"
+TOKEN = "8647816372:AAGG43oY-pndgRXT6V_E_REyW1zTHQ0-jrs"
 
 # 🟢 ሁለቱ አድሚኖች
 ADMIN_IDS = [7857140781, 7619940687]
